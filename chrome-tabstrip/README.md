@@ -61,8 +61,10 @@ compare automaticamente quando c'è spazio; se disattivata non compare mai.
 
 ## Uso rapido
 
-Serve Linux o macOS con `git`, `python3` e circa **15 GB** liberi. Al primo avvio `mach` scarica JDK e Android SDK
-in `~/.mozbuild`. Non serve compilare Gecko: si usa l'"artifact build" (vengono scaricati i binari di Mozilla).
+Serve Linux o macOS con `git`, `python3` e circa **25 GB** liberi (sorgente ~6 GB, file di build, cache di Gradle e
+`~/.mozbuild`). Al primo avvio `mach` scarica JDK e Android SDK in `~/.mozbuild` (anche un emulatore: se non ti serve
+puoi cancellare `~/.mozbuild/android-device` e `~/.mozbuild/android-sdk-linux/{emulator,system-images}`).
+Non serve compilare Gecko: si usa l'"artifact build" (vengono scaricati i binari di Mozilla).
 
 ```bash
 # 1. Scarica il sorgente di Firefox (Nightly, ramo main) — ~6 GB

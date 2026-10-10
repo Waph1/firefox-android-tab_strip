@@ -78,7 +78,10 @@ jobs:
         run: chrome-tabstrip/scripts/apply.sh "$RUNNER_TEMP/firefox"
 
       - name: Compila
-        run: chrome-tabstrip/scripts/build.sh "$RUNNER_TEMP/firefox" "${{ inputs.variant }}"
+        env:
+          PRUNE_EMULATOR: "1"
+          VARIANT: ${{ inputs.variant }}
+        run: chrome-tabstrip/scripts/build.sh "$RUNNER_TEMP/firefox" "$VARIANT"
 
       - uses: actions/upload-artifact@v4
         with:

@@ -14,6 +14,7 @@
 # Variabili d'ambiente:
 #   MOZBUILD_STATE_PATH   dove mach installa JDK e Android SDK (predefinito: ~/.mozbuild)
 #   TARGET                architettura (predefinito: aarch64-linux-android, quella del Galaxy Z Fold)
+#   PRUNE_EMULATOR=1      cancella l'emulatore Android scaricato da mach (~7 GB), che non serve per l'APK
 
 source "$(dirname "$0")/common.sh"
 
@@ -49,6 +50,14 @@ info "Preparo l'ambiente di compilazione (JDK, Android SDK)..."
 
 info "Scarico i binari di Gecko e preparo il build (./mach build)..."
 ./mach build
+
+if [ "${PRUNE_EMULATOR:-0}" = "1" ]; then
+    # L'emulatore Android (~7 GB) non serve per creare l'APK: lo si cancella per risparmiare spazio.
+    info "Elimino l'emulatore Android scaricato da mach (PRUNE_EMULATOR=1)"
+    rm -rf "$MOZBUILD_STATE_PATH/android-device" \
+        "$MOZBUILD_STATE_PATH"/android-sdk-*/emulator \
+        "$MOZBUILD_STATE_PATH"/android-sdk-*/system-images
+fi
 
 # Es. "nightly" -> "fenix:assembleNightly" (senza ${VARIANT^}, che non esiste nella bash 3 di macOS).
 TASK="fenix:assemble$(printf '%s' "${VARIANT:0:1}" | tr '[:lower:]' '[:upper:]')${VARIANT:1}"
