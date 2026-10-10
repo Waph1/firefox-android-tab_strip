@@ -48,6 +48,16 @@ info "Preparo l'ambiente di compilazione (JDK, Android SDK)..."
     --application-choice="GeckoView/Firefox for Android Artifact Mode" \
     --no-system-changes
 
+# Con --no-system-changes alcune versioni di Firefox (es. 157) non installano l'Android SDK: lo installiamo
+# esplicitamente nella versione richiesta da questo sorgente (senza scaricare l'immagine dell'emulatore).
+case "$(uname -s)" in
+    Linux) ANDROID_OS=linux ;;
+    Darwin) ANDROID_OS=macosx ;;
+    *) die "sistema operativo non supportato: $(uname -s)" ;;
+esac
+./mach python -c "import platform; from mozboot import android; \
+android.ensure_android('$ANDROID_OS', platform.machine(), artifact_mode=True, no_interactive=True)"
+
 info "Scarico i binari di Gecko e preparo il build (./mach build)..."
 ./mach build
 
