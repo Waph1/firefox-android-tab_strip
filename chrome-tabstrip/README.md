@@ -27,9 +27,14 @@ e, quando capitano, facili da risolvere.
 Le regole sono quelle di Chrome: la tab strip si mostra quando lo schermo su cui gira l'app è un "tablet"
 (lato corto ≥ 600dp, la stessa soglia di `DeviceFormFactor` di Chrome) **e** la finestra è larga almeno 412dp.
 
-Quando si apre o si chiude il telefono la tab strip appare/scompare **senza riavviare l'activity**, con
-un'animazione, e tutto il resto si adatta subito: altezza della toolbar e dell'area della pagina, pulsanti della
-toolbar (avanti/indietro/ricarica sugli schermi larghi), gradiente della status bar, barra di navigazione.
+Quando si apre o si chiude il telefono:
+
+- con la **barra degli indirizzi in alto**, la tab strip appare/scompare **al volo**, con un'animazione, e tutto il
+  resto si adatta subito: altezza della toolbar e dell'area della pagina, pulsanti della toolbar
+  (avanti/indietro/ricarica sugli schermi larghi), gradiente della status bar;
+- con la **barra degli indirizzi in basso** (sul telefono chiuso), aprendolo la barra deve salire in alto insieme
+  alla tab strip, come in Chrome: Firefox ricostruisce la schermata (si riavvia l'activity, le schede restano dove
+  sono), esattamente come fa Chrome quando un pieghevole passa da "telefono" a "tablet".
 
 Upstream, invece, Firefox **disabilita** la tab strip sui pieghevoli (controllo della cerniera in
 `Settings.isTabStripEligible`) e decide una sola volta all'avvio.
@@ -59,44 +64,96 @@ Colori e icone restano quelli di Firefox (tema chiaro/scuro/privato e sfondi del
 La preferenza **Impostazioni → Personalizza → Tab strip** continua a funzionare: se attiva (predefinito), la strip
 compare automaticamente quando c'è spazio; se disattivata non compare mai.
 
+## Versione di Firefox
+
+La patch segue le **versioni stabili** di Firefox per Android: gli script scaricano automaticamente l'ultima
+versione stabile pubblicata, cioè il tag `FIREFOX-ANDROID_<versione>_RELEASE` più recente (oggi **157.0.1**), che è
+esattamente il codice da cui Mozilla compila Firefox per il Play Store. Il file [`UPSTREAM_BASE`](UPSTREAM_BASE)
+indica il commit di Firefox su cui la patch è stata verificata l'ultima volta.
+
+Per provare un'altra versione basta la variabile `FIREFOX_VERSION`: `beta`, `main` (Nightly) o un tag preciso, ad es.
+`FIREFOX_VERSION=FIREFOX-ANDROID_157_0_RELEASE chrome-tabstrip/scripts/fetch-firefox.sh ~/firefox`.
+
 ## Uso rapido
 
 Serve Linux o macOS con `git`, `python3` e circa **25 GB** liberi (sorgente ~6 GB, file di build, cache di Gradle e
-`~/.mozbuild`). Al primo avvio `mach` scarica JDK e Android SDK in `~/.mozbuild` (anche un emulatore: se non ti serve
-puoi cancellare `~/.mozbuild/android-device` e `~/.mozbuild/android-sdk-linux/{emulator,system-images}`).
-Non serve compilare Gecko: si usa l'"artifact build" (vengono scaricati i binari di Mozilla).
+`~/.mozbuild`). Al primo avvio `mach` scarica JDK e Android SDK in `~/.mozbuild`. Non serve compilare Gecko: si usa
+l'"artifact build" (vengono scaricati i binari già compilati da Mozilla per quella versione).
 
 ```bash
-# 1. Scarica il sorgente di Firefox (Nightly, ramo main) — ~6 GB
+# 1. Scarica il sorgente dell'ultima versione stabile di Firefox — ~6 GB
 chrome-tabstrip/scripts/fetch-firefox.sh ~/firefox
 
 # 2. Applica la patch
 chrome-tabstrip/scripts/apply.sh ~/firefox
 
 # 3. Compila l'APK (prima volta ~30-60 minuti, poi molto meno)
-chrome-tabstrip/scripts/build.sh ~/firefox nightly
+chrome-tabstrip/scripts/build.sh ~/firefox
 
 # 4. Installa sul telefono (debug USB attivo)
-adb install -r ~/firefox/objdir-chrome-tabstrip/gradle/build/mobile/android/fenix/app/outputs/apk/nightly/*arm64-v8a*.apk
+adb install -r ~/firefox/objdir-chrome-tabstrip/gradle/build/mobile/android/fenix/app/outputs/apk/release/*arm64-v8a*.apk
 ```
 
-Varianti di `build.sh`:
+`mach` scarica anche un emulatore Android (~7 GB) che per l'APK non serve: se sei corto di spazio, lancia
+`build.sh` con `PRUNE_EMULATOR=1` per cancellarlo a fine preparazione (verrà però riscaricato alla build successiva).
 
-- `nightly` (consigliata): ottimizzata, si installa come "Firefox Nightly" (`org.mozilla.fenix`). Non si può
-  installare sopra la Nightly del Play Store (firma diversa): disinstallala prima o usa `debug`.
-- `debug`: più lenta, si installa accanto alle altre versioni (`org.mozilla.fenix.debug`).
+Varianti di `build.sh` (secondo argomento):
 
-Le build sono firmate con la chiave di debug di Android (`~/.android/debug.keystore`). **Conserva quel file**:
-con una chiave diversa gli aggiornamenti non si installano sopra la versione precedente (bisognerebbe
-disinstallare, perdendo i dati).
+- `release` (predefinita): si installa come **Firefox** (`org.mozilla.firefox`), identico a quello del Play Store
+  ma con la patch. Android non permette di installarlo sopra il Firefox del Play Store (firma diversa): prima
+  sincronizza i dati con il tuo account Mozilla (o esporta i segnalibri), poi disinstalla Firefox del Play Store.
+- `nightly`: stesso codice stabile, ma si installa come app separata "Firefox Nightly" (`org.mozilla.fenix`),
+  utile per provare la patch tenendo il Firefox del Play Store.
+- `debug`: più lenta, si installa come app separata (`org.mozilla.fenix.debug`), per sviluppo.
+
+## Chiave di firma e secret di GitHub
+
+Android accetta un aggiornamento solo se è firmato con la **stessa chiave** della versione installata. Gli APK sono
+firmati con la chiave di debug di Android, `~/.android/debug.keystore`, creata automaticamente alla prima
+compilazione: **conservala** (fanne una copia di sicurezza), altrimenti per aggiornare dovrai disinstallare
+l'app perdendo i dati.
+
+Se compili con GitHub Actions, la stessa chiave va salvata come *secret* del repository, così anche gli APK
+compilati da GitHub si installano sopra quelli precedenti:
+
+1. Sul computer dove hai compilato (o su qualsiasi computer con un JDK, se non hai ancora compilato) esegui:
+
+   ```bash
+   chrome-tabstrip/scripts/signing-key.sh
+   ```
+
+   Usa `~/.android/debug.keystore` se esiste (altrimenti ne crea una nuova) e scrive la chiave in formato testo
+   (base64) nel file `~/.android/debug.keystore.base64`.
+
+2. Su GitHub apri il repository → **Settings** → **Secrets and variables** → **Actions** →
+   **New repository secret** (per questo repository:
+   <https://github.com/Waph1/firefox-android-tab_strip/settings/secrets/actions/new>).
+
+3. In **Name** scrivi `ANDROID_DEBUG_KEYSTORE_BASE64`, in **Secret** incolla **tutto** il contenuto di
+   `~/.android/debug.keystore.base64` (su macOS: `pbcopy < ~/.android/debug.keystore.base64` lo copia negli
+   appunti; su Linux aprilo con un editor di testo), poi **Add secret**.
+
+   In alternativa, con la [GitHub CLI](https://cli.github.com/) già autenticata:
+
+   ```bash
+   gh secret set ANDROID_DEBUG_KEYSTORE_BASE64 --repo Waph1/firefox-android-tab_strip < ~/.android/debug.keystore.base64
+   ```
+
+4. Cancella `~/.android/debug.keystore.base64` (il secret è salvato cifrato su GitHub e non è più leggibile,
+   nemmeno da te: per questo serve la copia di sicurezza del file `debug.keystore`).
+
+Il workflow ripristina la chiave dal secret prima di compilare; se il secret manca, compila comunque ma con una
+chiave nuova a ogni esecuzione (e te lo segnala con un avviso).
 
 ## Quando esce una nuova versione di Firefox
 
+Firefox stabile si aggiorna ogni 4 settimane (più eventuali versioni correttive, es. 157.0.1):
+
 ```bash
 chrome-tabstrip/scripts/unapply.sh ~/firefox        # toglie la patch
-chrome-tabstrip/scripts/fetch-firefox.sh ~/firefox  # aggiorna il sorgente
+chrome-tabstrip/scripts/fetch-firefox.sh ~/firefox  # passa all'ultima versione stabile
 chrome-tabstrip/scripts/apply.sh ~/firefox          # riapplica la patch
-chrome-tabstrip/scripts/build.sh ~/firefox nightly  # ricompila
+chrome-tabstrip/scripts/build.sh ~/firefox          # ricompila
 ```
 
 `apply.sh` prova prima ad applicare la patch così com'è e poi, se il codice di Firefox è cambiato attorno alle
@@ -104,7 +161,7 @@ modifiche, con un **merge a 3 vie**. Se restano conflitti:
 
 1. apri i file elencati e risolvi le parti tra `<<<<<<<` e `>>>>>>>`;
 2. esegui `chrome-tabstrip/scripts/refresh.sh ~/firefox`, che rigenera `patches/*.patch` e aggiorna
-   `UPSTREAM_BASE` (il commit di Firefox su cui la patch è stata verificata l'ultima volta);
+   `UPSTREAM_BASE`;
 3. fai commit della patch aggiornata in questo repository.
 
 Per verificare senza modificare nulla: `chrome-tabstrip/scripts/apply.sh ~/firefox --check`.
@@ -117,26 +174,18 @@ MOZCONFIG=$PWD/mozconfig-chrome-tabstrip ./mach gradle fenix:testDebugUnitTest \
     --tests 'org.mozilla.fenix.browser.tabstrip.*' --tests 'org.mozilla.fenix.theme.StatusBarColorManagerTest'
 ```
 
-Per seguire Beta o Release invece di Nightly: `UPSTREAM_BRANCH=beta chrome-tabstrip/scripts/fetch-firefox.sh ...`
-(i rami disponibili sono quelli di [mozilla-firefox/firefox](https://github.com/mozilla-firefox/firefox/branches)).
-
 ## Automazione con GitHub Actions
 
 Il workflow [`.github/workflows/chrome-tabstrip.yml`](../.github/workflows/chrome-tabstrip.yml):
 
-- **ogni giorno** verifica che la patch si applichi ancora all'ultima versione di Firefox: se fallisce, GitHub
-  ti avvisa via e-mail e sai che è ora di aggiornarla;
+- **ogni giorno** verifica che la patch si applichi ancora all'ultima versione stabile di Firefox: quando esce una
+  nuova versione che la rompe, GitHub ti avvisa via e-mail e sai che è ora di aggiornarla;
 - su richiesta (**Actions → Chrome-like tab strip → Run workflow**, opzione *build*) compila anche l'APK e lo
-  allega all'esecuzione come artifact da scaricare.
+  allega all'esecuzione come artifact da scaricare (`firefox-<versione>-chrome-tabstrip-release`).
 
-Note:
-
-- GitHub mostra il pulsante *Run workflow* e avvia le esecuzioni pianificate solo per i workflow presenti nel ramo
-  predefinito: porta il workflow e la cartella `chrome-tabstrip/` su `main` (finché stanno solo su un altro ramo, il
-  controllo parte comunque a ogni push che li modifica);
-- per avere APK aggiornabili l'uno sopra l'altro, salva la tua chiave di debug come secret
-  `ANDROID_DEBUG_KEYSTORE_BASE64` (`base64 -w0 ~/.android/debug.keystore`, su macOS `base64 -i ~/.android/debug.keystore`);
-  senza secret ogni build ha una chiave diversa.
+GitHub mostra il pulsante *Run workflow* e avvia le esecuzioni pianificate solo per i workflow presenti nel ramo
+predefinito: porta il workflow e la cartella `chrome-tabstrip/` su `main` (finché stanno solo su un altro ramo, il
+controllo parte comunque a ogni push che li modifica).
 
 ## Cosa tocca la patch
 
@@ -152,20 +201,21 @@ Modifiche piccole ai file esistenti:
 
 - `utils/Settings.kt` — `isTabStripEnabled` = preferenza utente (`isTabStripPreferenceEnabled`) **e** finestra
   abbastanza grande; rimosso il blocco per i pieghevoli.
-- `HomeActivity.kt` — aggiorna `AdaptiveTabStrip` in `onCreate` e in `onConfigurationChanged` (prima dei fragment).
-- `BrowserToolbarComposable.kt`, `HomeToolbarComposable.kt`, `BrowserNavigationBar.kt`, `HomeNavigationBar.kt` —
-  ricalcolano la visibilità della strip quando cambia la finestra e la mostrano/nascondono con un'animazione.
-- `BaseBrowserFragment.kt` — la strip in alto con toolbar in basso viene creata anche a telefono chiuso.
+- `HomeActivity.kt` — aggiorna `AdaptiveTabStrip` in `onCreate` e in `onConfigurationChanged` (prima dei fragment)
+  e ricostruisce l'interfaccia se la barra degli indirizzi deve cambiare posizione.
+- `BrowserToolbarComposable.kt`, `HomeToolbarComposable.kt` — ricalcolano la visibilità della strip quando cambia
+  la finestra e la mostrano/nascondono con un'animazione.
 - `components/toolbar/BrowserToolbarMiddleware.kt`, `home/toolbar/BrowserToolbarMiddleware.kt` — ricostruiscono i
   pulsanti della toolbar anche quando la finestra cambia senza ruotare (tipico del Fold).
 - `StatusBarColorManager.kt`, `TabStripStatusBarView.kt` — il gradiente della status bar segue la strip.
 - `CustomizationFragment.kt` — l'interruttore nelle impostazioni usa la preferenza utente.
 - `TabStrip.kt` (usa `ChromeStyleTabStripContent`), `TabStripState.kt` (stato di caricamento), `dimens.xml`
-  (altezza 40dp), `StatusBarColorManagerTest.kt` e `FragmentTest.kt` (adeguati alle modifiche).
+  (altezza 40dp), `StatusBarColorManagerTest.kt` (adeguato alle modifiche).
 
 ## Differenze rispetto a Chrome
 
-- Chrome riavvia l'activity quando il Fold passa da "telefono" a "tablet"; qui il passaggio avviene al volo.
+- Chrome riavvia sempre l'activity quando il Fold passa da "telefono" a "tablet"; qui succede solo se la barra
+  degli indirizzi deve cambiare posizione, altrimenti il passaggio avviene al volo.
 - Colori, icone e caratteri sono quelli di Firefox, non di Google.
 - Non ci sono i gruppi di schede di Chrome nella strip (Firefox ha una propria barra dei gruppi, che resta come
   upstream) né le anteprime al passaggio del mouse.

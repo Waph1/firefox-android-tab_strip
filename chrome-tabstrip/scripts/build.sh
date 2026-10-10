@@ -19,7 +19,7 @@
 source "$(dirname "$0")/common.sh"
 
 FIREFOX_DIR="${1:-}"
-VARIANT="${2:-nightly}"
+VARIANT="${2:-release}"
 TARGET="${TARGET:-aarch64-linux-android}"
 require_firefox_checkout "$FIREFOX_DIR"
 

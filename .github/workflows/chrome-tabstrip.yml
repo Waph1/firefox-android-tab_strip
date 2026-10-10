@@ -1,5 +1,5 @@
-# Verifica ogni giorno che la patch "tab strip in stile Chrome" si applichi ancora all'ultima versione di
-# Firefox per Android e, su richiesta, compila l'APK. Vedi chrome-tabstrip/README.md.
+# Verifica ogni giorno che la patch "tab strip in stile Chrome" si applichi ancora all'ultima versione stabile
+# di Firefox per Android e, su richiesta, compila l'APK. Vedi chrome-tabstrip/README.md.
 name: Chrome-like tab strip
 
 on:
@@ -11,18 +11,18 @@ on:
       - ".github/workflows/chrome-tabstrip.yml"
   workflow_dispatch:
     inputs:
-      branch:
-        description: "Ramo di Firefox (main = Nightly, beta, release)"
+      version:
+        description: "Versione di Firefox: stable (ultima stabile), beta, main (Nightly) o un tag FIREFOX-ANDROID_..."
         required: true
-        default: main
+        default: stable
       build:
         description: "Compila anche l'APK (richiede circa un'ora)"
         type: boolean
         default: false
       variant:
-        description: "Variante dell'APK (nightly o debug)"
+        description: "Variante dell'APK: release (Firefox), nightly (Firefox Nightly) o debug"
         required: true
-        default: nightly
+        default: release
 
 permissions:
   contents: read
@@ -32,7 +32,7 @@ jobs:
     name: La patch si applica?
     runs-on: ubuntu-latest
     env:
-      UPSTREAM_BRANCH: ${{ inputs.branch || 'main' }}
+      FIREFOX_VERSION: ${{ inputs.version || 'stable' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
-      UPSTREAM_BRANCH: ${{ inputs.branch }}
+      FIREFOX_VERSION: ${{ inputs.version }}
     steps:
       - name: Libera spazio su disco
         run: |
@@ -72,7 +72,9 @@ jobs:
           fi
 
       - name: Scarica Firefox
-        run: chrome-tabstrip/scripts/fetch-firefox.sh "$RUNNER_TEMP/firefox"
+        run: |
+          chrome-tabstrip/scripts/fetch-firefox.sh "$RUNNER_TEMP/firefox"
+          echo "FX_VERSION=$(cat "$RUNNER_TEMP/firefox/mobile/android/version.txt")" >> "$GITHUB_ENV"
 
       - name: Applica la patch
         run: chrome-tabstrip/scripts/apply.sh "$RUNNER_TEMP/firefox"
@@ -85,6 +87,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: firefox-chrome-tabstrip-${{ inputs.variant }}
+          name: firefox-${{ env.FX_VERSION }}-chrome-tabstrip-${{ inputs.variant }}
           path: ${{ runner.temp }}/firefox/objdir-chrome-tabstrip/gradle/build/mobile/android/fenix/app/outputs/apk/**/*.apk
           if-no-files-found: error

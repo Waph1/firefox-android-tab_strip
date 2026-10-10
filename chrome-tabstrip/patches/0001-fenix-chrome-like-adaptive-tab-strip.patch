@@ -1,8 +1,8 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
-index 447a7ff12b2..6fd097a8f91 100644
+index 4364da68986..50eaab3670e 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
-@@ -112,6 +112,7 @@ import org.mozilla.fenix.browser.BrowserFragmentDirections
+@@ -113,6 +113,7 @@ import org.mozilla.fenix.browser.BrowserFragment
  import org.mozilla.fenix.browser.browsingmode.BrowsingMode
  import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
  import org.mozilla.fenix.browser.browsingmode.DefaultBrowsingModeManager
@@ -10,7 +10,7 @@ index 447a7ff12b2..6fd097a8f91 100644
  import org.mozilla.fenix.components.DefaultHomepageAsANewTabPreferenceRepository
  import org.mozilla.fenix.components.DefaultShortcutManagerCompatWrapper
  import org.mozilla.fenix.components.accounts.FenixFxAEntryPoint
-@@ -476,6 +477,9 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -472,6 +473,9 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
              browsingModeManager = createBrowsingModeManager(intent)
              setupTheme()
  
@@ -20,42 +20,31 @@ index 447a7ff12b2..6fd097a8f91 100644
              super.onCreate(savedInstanceState)
          }
  
-@@ -1022,6 +1026,10 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -1016,6 +1020,11 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
      }
  
      final override fun onConfigurationChanged(newConfig: Configuration) {
 +        // Update the tab strip visibility (e.g. a foldable was folded / unfolded) before the fragments are notified,
 +        // so they lay themselves out with the new toolbar height.
++        val previousToolbarPosition = components.settings.toolbarPosition
 +        AdaptiveTabStrip.onWindowChanged(this, newConfig)
 +
          super.onConfigurationChanged(newConfig)
  
          // Diagnostic breadcrumb for "Display already aquired" crash:
-diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
-index ed334079e81..73fae3e3437 100644
---- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
-+++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
-@@ -1542,9 +1542,18 @@ abstract class BaseBrowserFragment :
-         appStore: AppStore,
-         settings: org.mozilla.fenix.utils.Settings,
-     ) =
--        if (customTabSessionId == null && settings.shouldShowTabStripAtTop && settings.shouldUseBottomToolbar) {
-+        if (
-+            customTabSessionId == null &&
-+                settings.isTabStripPreferenceEnabled &&
-+                !settings.shouldUseBottomTabStrip &&
-+                settings.shouldUseBottomToolbar
-+        ) {
-+            // Created even when the window is currently too small for the tab strip so that it can appear as soon as
-+            // the window grows (e.g. when a foldable is unfolded).
-             BrowserTabStrip(context, binding.browserLayout, settings) {
--                buildTabStrip(appStore, settings)()
-+                if (settings.shouldShowTabStripAtTop) {
-+                    buildTabStrip(appStore, settings)()
-+                }
-             }
-         } else {
-             null
+@@ -1025,6 +1034,12 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+         components.appStore.dispatch(
+             AppAction.OrientationChange(orientation = OrientationMode.fromInteger(newConfig.orientation))
+         )
++
++        // The tab strip always comes with the toolbar at the top. When showing / hiding it also moves a bottom
++        // toolbar, rebuild the UI, like Chrome does when a foldable switches between phone and tablet layouts.
++        if (components.settings.toolbarPosition != previousToolbarPosition) {
++            recreate()
++        }
+     }
+ 
+     final override fun recreate() {
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStrip.kt
 new file mode 100644
 index 00000000000..dc85d3a2922
@@ -898,20 +887,20 @@ index 00000000000..63262feabe8
 +            drawRect(brush = brush, blendMode = BlendMode.DstIn)
 +        }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
-index 8155be98d74..91f7571e04c 100644
+index 85c26242201..1538c6aead5 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
-@@ -182,8 +182,9 @@ fun TabStrip(
-                 animationSpec = tween(durationMillis = TAB_STRIP_VISIBILITY_ANIMATION_MS),
-             ),
-     ) {
--        TabStripContent(
-+        ChromeStyleTabStripContent(
-             state = state,
-+            modeToggle = rememberTabStripModeToggle(browserStore, state.isPrivateMode),
-             showTabCounterButton = showTabCounterButton,
-             colors = tabStripColors,
-             onAddTabClick = createAddTabClickHandler(onAddTabClick),
+@@ -151,8 +151,9 @@ fun TabStrip(
+     }
+         .collectAsState(initial = TabStripState.initial)
+ 
+-    TabStripContent(
++    ChromeStyleTabStripContent(
+         state = state,
++        modeToggle = rememberTabStripModeToggle(browserStore, state.isPrivateMode),
+         showTabCounterButton = showTabCounterButton,
+         colors = tabStripColors,
+         onAddTabClick = {
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripState.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripState.kt
 index b57f3a1f225..c92339911e0 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripState.kt
@@ -939,48 +928,8 @@ index b57f3a1f225..c92339911e0 100644
 +        isLoading = content.loading,
      )
  }
-diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserNavigationBar.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserNavigationBar.kt
-index 10396db381d..349f598ac1e 100644
---- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserNavigationBar.kt
-+++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserNavigationBar.kt
-@@ -28,6 +28,7 @@ import mozilla.components.compose.browser.toolbar.store.ToolbarGravity.Top
- import mozilla.components.support.utils.KeyboardState
- import mozilla.components.support.utils.keyboardAsState
- import org.mozilla.fenix.R
-+import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
- import org.mozilla.fenix.theme.FirefoxTheme
- import org.mozilla.fenix.utils.Settings
- 
-@@ -58,13 +59,15 @@ class BrowserNavigationBar(
- ) {
-     val layout =
-         NavigationBarComposeView(context) {
--                val shouldShowTabStrip = remember {
-+                // Recompose when the window changes (e.g. a foldable is folded / unfolded) to show / hide the tab strip.
-+                val isTabStripAllowed = AdaptiveTabStrip.isTabStripAllowed
-+                val shouldShowTabStrip = remember(isTabStripAllowed) {
-                     customTabSessionId == null && settings.shouldShowTabStripAtBottom
-                 }
--                val shouldShowTabGroupsStrip = remember {
-+                val shouldShowTabGroupsStrip = remember(isTabStripAllowed) {
-                     customTabSessionId == null && settings.shouldShowTabGroupsStrip
-                 }
--                val hasBottomStrips = remember { hasBottomStrip() }
-+                val hasBottomStrips = remember(isTabStripAllowed) { hasBottomStrip() }
- 
-                 FirefoxTheme {
-                     TopDividerColumn(
-@@ -115,7 +118,7 @@ class BrowserNavigationBar(
-                     false -> Top
-                 }
-             }
--        val hasBottomStrip = remember { hasBottomStrip() }
-+        val hasBottomStrip = remember(AdaptiveTabStrip.isTabStripAllowed) { hasBottomStrip() }
-         val isKeyboardVisible =
-             if (hideWhenKeyboardShown) {
-                 val keyboardState by keyboardAsState()
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
-index 3f14f1e68c4..3295df206f3 100644
+index b19a37d5512..c458ea75998 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
 @@ -9,6 +9,7 @@ import android.view.View
@@ -988,10 +937,10 @@ index 3f14f1e68c4..3295df206f3 100644
  import androidx.annotation.VisibleForTesting
  import androidx.appcompat.app.AppCompatActivity
 +import androidx.compose.animation.AnimatedVisibility
- import androidx.compose.foundation.background
- import androidx.compose.foundation.layout.Box
  import androidx.compose.foundation.layout.Column
-@@ -50,6 +51,7 @@ import mozilla.components.ui.widgets.behavior.DependencyGravity
+ import androidx.compose.foundation.layout.fillMaxWidth
+ import androidx.compose.foundation.layout.wrapContentHeight
+@@ -48,6 +49,7 @@ import mozilla.components.ui.widgets.behavior.DependencyGravity
  import mozilla.components.ui.widgets.behavior.EngineViewScrollingBehavior
  import mozilla.components.ui.widgets.behavior.EngineViewScrollingBehaviorFactory
  import org.mozilla.fenix.browser.store.BrowserScreenStore
@@ -999,52 +948,38 @@ index 3f14f1e68c4..3295df206f3 100644
  import org.mozilla.fenix.components.AppStore
  import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchEnded
  import org.mozilla.fenix.components.toolbar.ToolbarPosition.BOTTOM
-@@ -102,16 +104,18 @@ class BrowserToolbarComposable(
+@@ -98,7 +100,9 @@ class BrowserToolbarComposable(
      val layout: View =
          ScrollableToolbarComposeView(activity, this) {
                  val isSearching = toolbarStore.observeAsComposableState { it.isEditMode() }.value
--                val shouldShowTabStripAtTop = remember {
+-                val shouldShowTabStrip: Boolean = remember { shouldShowTabStrip() }
 +                // Recompose when the window changes (e.g. a foldable is folded / unfolded) to show / hide the tab strip.
 +                val isTabStripAllowed = AdaptiveTabStrip.isTabStripAllowed
-+                val shouldShowTabStripAtTop = remember(isTabStripAllowed) {
-                     customTabSession == null && settings.shouldShowTabStripAtTop
-                 }
--                val shouldShowTabStripAtBottom = remember {
-+                val shouldShowTabStripAtBottom = remember(isTabStripAllowed) {
-                     customTabSession == null && settings.shouldShowTabStripAtBottom
-                 }
--                val shouldShowTabGroupsStrip: Boolean = remember {
-+                val shouldShowTabGroupsStrip: Boolean = remember(isTabStripAllowed) {
-                     customTabSession == null && settings.shouldShowTabGroupsStrip
-                 }
--                val hasBottomStrip = remember {
-+                val hasBottomStrip = remember(isTabStripAllowed) {
-                     customTabSession == null &&
-                         (settings.shouldShowTabStripAtBottom || settings.shouldShowTabGroupsStrip)
-                 }
-@@ -165,7 +169,7 @@ class BrowserToolbarComposable(
-                         when (!shouldUseBottomToolbar) {
++                val shouldShowTabStrip: Boolean = remember(isTabStripAllowed) { shouldShowTabStrip() }
+                 val customColors = browserScreenStore.observeAsComposableState { it.customTabColors }
+                 val shouldUseBottomToolbar = remember(settings) { settings.shouldUseBottomToolbar }
+ 
+@@ -146,10 +150,13 @@ class BrowserToolbarComposable(
+                         }
+ 
+                     MaterialTheme(colorScheme = colorScheme) {
+-                        when (shouldShowTabStrip) {
++                        // A top toolbar stays in place while the tab strip appears / disappears with the window.
++                        when (shouldShowTabStrip || !shouldUseBottomToolbar) {
                              true ->
                                  Column(modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
--                                    if (shouldShowTabStripAtTop) {
-+                                    AnimatedVisibility(visible = shouldShowTabStripAtTop) {
-                                         tabStripContent()
-                                     }
+-                                    tabStripContent()
++                                    AnimatedVisibility(visible = shouldShowTabStrip) {
++                                        tabStripContent()
++                                    }
                                      BrowserToolbar(
-@@ -185,7 +189,7 @@ class BrowserToolbarComposable(
-                                         searchSuggestionsContent(Modifier.weight(1f))
-                                     }
-                                     TopDividerColumn(showDivider = hasBottomStrip, modifier = Modifier.fillMaxWidth()) {
--                                        if (shouldShowTabStripAtBottom) {
-+                                        AnimatedVisibility(visible = shouldShowTabStripAtBottom) {
-                                             Box(modifier = Modifier.background(MaterialTheme.colorScheme.surface)) {
-                                                 tabStripContent()
-                                             }
+                                         store = toolbarStore,
+                                         cfr = toolbarCFR,
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarMiddleware.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarMiddleware.kt
-index 7500c18a76b..21e4dd9570b 100644
+index c1ff8ae52b6..70c5d242495 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarMiddleware.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarMiddleware.kt
-@@ -14,6 +14,8 @@ import kotlinx.coroutines.CoroutineScope
+@@ -13,6 +13,8 @@ import kotlinx.coroutines.CoroutineScope
  import kotlinx.coroutines.Dispatchers
  import kotlinx.coroutines.Job
  import kotlinx.coroutines.flow.Flow
@@ -1053,7 +988,7 @@ index 7500c18a76b..21e4dd9570b 100644
  import kotlinx.coroutines.flow.distinctUntilChangedBy
  import kotlinx.coroutines.flow.first
  import kotlinx.coroutines.launch
-@@ -103,6 +105,7 @@ import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
+@@ -102,6 +104,7 @@ import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
  import org.mozilla.fenix.browser.readermode.ReaderModeController
  import org.mozilla.fenix.browser.store.BrowserScreenAction
  import org.mozilla.fenix.browser.store.BrowserScreenStore
@@ -1061,7 +996,7 @@ index 7500c18a76b..21e4dd9570b 100644
  import org.mozilla.fenix.components.AppStore
  import org.mozilla.fenix.components.NimbusComponents
  import org.mozilla.fenix.components.UseCases
-@@ -962,7 +965,10 @@ class BrowserToolbarMiddleware(
+@@ -951,7 +954,10 @@ class BrowserToolbarMiddleware(
  
      private fun observeOrientationChanges(store: Store<BrowserToolbarState, BrowserToolbarAction>) {
          appStore.observeWhileActive {
@@ -1074,7 +1009,7 @@ index 7500c18a76b..21e4dd9570b 100644
                      updateStartBrowserActions(store)
                      updateEndBrowserActions(store)
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/BrowserToolbarMiddleware.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/BrowserToolbarMiddleware.kt
-index 9c8c89423b2..95b974237f8 100644
+index 3a7e1899905..9f4ec732d6a 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/BrowserToolbarMiddleware.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/BrowserToolbarMiddleware.kt
 @@ -15,6 +15,8 @@ import kotlinx.coroutines.CoroutineScope
@@ -1094,7 +1029,7 @@ index 9c8c89423b2..95b974237f8 100644
  import org.mozilla.fenix.components.AppStore
  import org.mozilla.fenix.components.appstate.AppAction
  import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchStarted
-@@ -537,7 +540,10 @@ class BrowserToolbarMiddleware(
+@@ -532,7 +535,10 @@ class BrowserToolbarMiddleware(
  
      private fun updateToolbarActionsBasedOnOrientation(store: Store<BrowserToolbarState, BrowserToolbarAction>) {
          appStore.observeWhileActive {
@@ -1106,34 +1041,11 @@ index 9c8c89423b2..95b974237f8 100644
                  .collect {
                      updateStartBrowserActions(store)
                      updateEndBrowserActions(store)
-diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeNavigationBar.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeNavigationBar.kt
-index 0b340f46340..778cd501a8e 100644
---- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeNavigationBar.kt
-+++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeNavigationBar.kt
-@@ -17,6 +17,7 @@ import mozilla.components.compose.browser.toolbar.store.ToolbarGravity.Top
- import mozilla.components.support.utils.KeyboardState
- import mozilla.components.support.utils.keyboardAsState
- import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
-+import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
- import org.mozilla.fenix.components.AppStore
- import org.mozilla.fenix.theme.FirefoxTheme
- import org.mozilla.fenix.utils.Settings
-@@ -50,7 +51,9 @@ class HomeNavigationBar(
-                     false -> Top
-                 }
-             }
--        val hasBottomStrip = remember { settings.shouldShowTabStripAtBottom || settings.shouldShowTabGroupsStrip }
-+        val hasBottomStrip = remember(AdaptiveTabStrip.isTabStripAllowed) {
-+            settings.shouldShowTabStripAtBottom || settings.shouldShowTabGroupsStrip
-+        }
-         val isKeyboardVisible =
-             if (hideWhenKeyboardShown) {
-                 val keyboardState by keyboardAsState()
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
-index fe54f0c099d..ed39c0a67b1 100644
+index c95bb50f2f4..1a6e13ac250 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
-@@ -46,6 +46,7 @@ import mozilla.components.compose.browser.toolbar.ui.BrowserToolbarQuery
+@@ -44,6 +44,7 @@ import mozilla.components.compose.browser.toolbar.ui.BrowserToolbarQuery
  import mozilla.components.lib.state.ext.observeAsComposableState
  import org.mozilla.fenix.R
  import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
@@ -1141,50 +1053,31 @@ index fe54f0c099d..ed39c0a67b1 100644
  import org.mozilla.fenix.components.AppStore
  import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchEnded
  import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchStarted
-@@ -150,14 +151,18 @@ internal class HomeToolbarComposable(
+@@ -147,7 +148,9 @@ internal class HomeToolbarComposable(
+ 
      @Composable
      private fun ToolbarContent(wallpaperTextColor: Color?) {
-         val shouldUseBottomToolbar = remember { settings.shouldUseBottomToolbar }
--        val shouldShowTabStrip = remember {
+-        val shouldShowTabStrip: Boolean = remember { settings.isTabStripEnabled }
 +        // Recompose when the window changes (e.g. a foldable is folded / unfolded) to show / hide the tab strip.
 +        val isTabStripAllowed = AdaptiveTabStrip.isTabStripAllowed
-+        val shouldShowTabStrip = remember(isTabStripAllowed) {
-             if (shouldUseBottomToolbar) {
-                 settings.shouldShowTabStripAtBottom
-             } else {
-                 settings.shouldShowTabStripAtTop
-             }
-         }
--        val isTabStripAtBottom = remember { shouldUseBottomToolbar && settings.shouldShowTabStripAtBottom }
-+        val isTabStripAtBottom = remember(isTabStripAllowed) {
-+            shouldUseBottomToolbar && settings.shouldShowTabStripAtBottom
-+        }
++        val shouldShowTabStrip: Boolean = remember(isTabStripAllowed) { settings.isTabStripEnabled }
+         val isAddressBarVisible = remember { addressBarVisibility }
  
          Column(
-             modifier =
-@@ -171,7 +176,7 @@ internal class HomeToolbarComposable(
+@@ -157,7 +160,7 @@ internal class HomeToolbarComposable(
+                     testTag = context.resources.getResourceName(R.id.composable_toolbar)
+                 }
+         ) {
+-            if (shouldShowTabStrip) {
++            AnimatedVisibility(visible = shouldShowTabStrip) {
+                 tabStripContent()
              }
  
-             TopDividerColumn(showDivider = isTabStripAtBottom, modifier = Modifier.fillMaxWidth()) {
--                if (shouldShowTabStrip) {
-+                AnimatedVisibility(visible = shouldShowTabStrip) {
-                     tabStripContent()
-                 }
- 
-@@ -191,7 +196,7 @@ internal class HomeToolbarComposable(
-     @Composable
-     private fun ColumnScope.AddressBar(wallpaperTextColor: Color?) {
-         val isAddressBarVisible = remember { addressBarVisibility }
--        val hasBottomStrip = remember {
-+        val hasBottomStrip = remember(AdaptiveTabStrip.isTabStripAllowed) {
-             settings.shouldUseBottomToolbar &&
-                 (settings.shouldShowTabStripAtBottom || settings.shouldShowTabGroupsStrip)
-         }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
-index 1956c4ef6f2..9a2976c7915 100644
+index 8eaf185575f..4f2896cc81d 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
-@@ -304,11 +304,11 @@ class CustomizationFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFrag
+@@ -320,12 +320,12 @@ class CustomizationFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFrag
          val tabStripSwitch = requirePreference<SwitchPreferenceCompat>(R.string.pref_key_tab_strip_show)
          val context = requireContext()
  
@@ -1194,34 +1087,26 @@ index 1956c4ef6f2..9a2976c7915 100644
          tabStripSwitch.setOnPreferenceChangeListener { _, newValue ->
              val enabled = newValue as Boolean
 -            context.components.settings.isTabStripEnabled = enabled
+-            updateToolbarCategoryBasedOnTabStrip(enabled)
 +            context.components.settings.isTabStripPreferenceEnabled = enabled
++            updateToolbarCategoryBasedOnTabStrip(context.components.settings.isTabStripEnabled)
              setupToolbarLayout()
-             setupTabStripLocationCategory()
              updateToolbarShortcut()
-@@ -318,7 +318,7 @@ class CustomizationFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFrag
- 
-     private fun setupTabStripLocationCategory() {
-         val settings = requireComponents.settings
--        val isTabStripEnabled = settings.isTabStripEnabled
-+        val isTabStripEnabled = settings.isTabStripPreferenceEnabled
- 
-         requirePreference<PreferenceCategory>(R.string.pref_key_tab_strip_location).isVisible = isTabStripEnabled
-         if (!isTabStripEnabled) return
+             true
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt
-index dbcf87fe9d4..c21c151a166 100644
+index 605e14db948..83b5e11b53f 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt
-@@ -71,8 +71,11 @@ class StatusBarColorManager(
+@@ -70,8 +70,10 @@ class StatusBarColorManager(
+         wallpaperScope = null
  
          when {
-             // Don't show the status bar gradient if tab strip is not enabled, shown at the bottom
--            // or private mode is enabled.
--            !settings.isTabStripEnabled || settings.shouldUseBottomTabStrip || themeManager.currentTheme.isPrivate -> {
-+            // or private mode is enabled. Whether the window is currently large enough for the tab strip
-+            // is handled by [TabStripStatusBarView] itself, so that it follows folding / unfolding.
-+            !settings.isTabStripPreferenceEnabled ||
-+                settings.shouldUseBottomTabStrip ||
-+                themeManager.currentTheme.isPrivate -> {
+-            // Don't show the gradient if tab strip is not enabled or private mode is enabled.
+-            !settings.isTabStripEnabled || themeManager.currentTheme.isPrivate -> {
++            // Don't show the gradient if tab strip is not enabled or private mode is enabled. Whether the window
++            // is currently large enough for the tab strip is handled by [TabStripStatusBarView] itself, so that
++            // it follows folding / unfolding.
++            !settings.isTabStripPreferenceEnabled || themeManager.currentTheme.isPrivate -> {
                  tabStripStatusBarView.hide()
              }
  
@@ -1262,10 +1147,10 @@ index 22f6ecba25f..cb2a5652898 100644
                  }
              }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
-index 14b8faaa9dc..005694bd4ea 100644
+index 7881995e292..388b977d124 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
-@@ -30,7 +30,6 @@ import mozilla.components.lib.crash.store.CrashReportOption
+@@ -29,7 +29,6 @@ import mozilla.components.lib.crash.store.CrashReportOption
  import mozilla.components.support.base.log.logger.Logger
  import mozilla.components.support.ktx.android.content.PreferencesHolder
  import mozilla.components.support.ktx.android.content.booleanPreference
@@ -1273,15 +1158,15 @@ index 14b8faaa9dc..005694bd4ea 100644
  import mozilla.components.support.ktx.android.content.floatPreference
  import mozilla.components.support.ktx.android.content.intPreference
  import mozilla.components.support.ktx.android.content.longPreference
-@@ -49,6 +48,7 @@ import org.mozilla.fenix.GleanMetrics.TopSites
+@@ -48,6 +47,7 @@ import org.mozilla.fenix.GleanMetrics.TopSites
  import org.mozilla.fenix.R
  import org.mozilla.fenix.autofill.address.RegionAddressFeatureGate
  import org.mozilla.fenix.browser.browsingmode.BrowsingMode
 +import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
- import org.mozilla.fenix.components.lens.CameraMode
  import org.mozilla.fenix.components.settings.counterPreference
  import org.mozilla.fenix.components.settings.featureFlagBooleanPreference
-@@ -2265,14 +2265,29 @@ class Settings(
+ import org.mozilla.fenix.components.settings.lazyFeatureFlagBooleanPreference
+@@ -2217,14 +2217,29 @@ class Settings(
              default = { FxNimbus.features.searchOptimizationOption.value().showSportsCard },
          )
  
@@ -1315,7 +1200,7 @@ index 14b8faaa9dc..005694bd4ea 100644
      var isDynamicToolbarEnabled by
          booleanPreference(
              appContext.getPreferenceKey(R.string.pref_key_dynamic_toolbar),
-@@ -2313,16 +2328,6 @@ class Settings(
+@@ -2265,16 +2280,6 @@ class Settings(
              featureFlag = isAddressFeatureEnabled(appContext),
          )
  
@@ -1333,24 +1218,24 @@ index 14b8faaa9dc..005694bd4ea 100644
      private fun isAddressFeatureEnabled(context: Context): Boolean {
          val locale = LocaleManager.getCurrentLocale(context) ?: LocaleManager.getSystemDefault()
 diff --git a/mobile/android/fenix/app/src/main/res/values/dimens.xml b/mobile/android/fenix/app/src/main/res/values/dimens.xml
-index 0d898d8c48d..69565fee628 100644
+index e4d1174f1e4..c0f28d14c80 100644
 --- a/mobile/android/fenix/app/src/main/res/values/dimens.xml
 +++ b/mobile/android/fenix/app/src/main/res/values/dimens.xml
-@@ -66,7 +66,7 @@
+@@ -65,7 +65,7 @@
      <dimen name="browser_toolbar_height">56dp</dimen>
      <dimen name="browser_navbar_height">60dp</dimen>
      <dimen name="browser_navbar_height_small">48dp</dimen>
 -    <dimen name="tab_strip_height">56dp</dimen>
 +    <dimen name="tab_strip_height">40dp</dimen>
      <dimen name="browser_microsurvey_height">131dp</dimen>
-     <dimen name="tab_groups_strip_height">48dp</dimen>
  
+     <!-- Home Fragment -->
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt
 new file mode 100644
-index 00000000000..34465b74708
+index 00000000000..e4e5e3a8ddf
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt
-@@ -0,0 +1,91 @@
+@@ -0,0 +1,93 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -1364,6 +1249,7 @@ index 00000000000..34465b74708
 +import org.junit.Assert.assertTrue
 +import org.junit.Test
 +import org.junit.runner.RunWith
++import org.mozilla.fenix.components.toolbar.ToolbarPosition
 +import org.mozilla.fenix.utils.Settings
 +import org.robolectric.RobolectricTestRunner
 +
@@ -1419,15 +1305,16 @@ index 00000000000..34465b74708
 +    fun `GIVEN the tab strip preference is enabled WHEN the window changes THEN the tab strip follows the window`() {
 +        val settings = Settings(testContext)
 +        settings.isTabStripPreferenceEnabled = true
-+        settings.shouldUseBottomTabStrip = false
++        settings.shouldUseBottomToolbar = true
 +
 +        AdaptiveTabStrip.update(isTabletScreen = true, screenWidthDp = 690, screenHeightDp = 829)
 +        assertTrue(settings.isTabStripEnabled)
-+        assertTrue(settings.shouldShowTabStripAtTop)
++        // Like in Chrome, the toolbar moves to the top together with the tab strip.
++        assertEquals(ToolbarPosition.TOP, settings.toolbarPosition)
 +
 +        AdaptiveTabStrip.update(isTabletScreen = false, screenWidthDp = 411, screenHeightDp = 960)
 +        assertFalse(settings.isTabStripEnabled)
-+        assertFalse(settings.shouldShowTabStripAtTop)
++        assertEquals(ToolbarPosition.BOTTOM, settings.toolbarPosition)
 +        assertTrue(settings.isTabStripPreferenceEnabled)
 +    }
 +
@@ -1515,28 +1402,6 @@ index 00000000000..210e7b080a7
 +        )
 +    }
 +}
-diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/ext/FragmentTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/ext/FragmentTest.kt
-index 96fdcef1666..6e5710c9582 100644
---- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/ext/FragmentTest.kt
-+++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/ext/FragmentTest.kt
-@@ -197,7 +197,7 @@ class FragmentTest {
- 
-         val bottomToolbarHeight = fragment.getBottomToolbarHeight()
- 
--        assertEquals(291, bottomToolbarHeight)
-+        assertEquals(275, bottomToolbarHeight)
-     }
- 
-     @Test
-@@ -219,7 +219,7 @@ class FragmentTest {
- 
-         val topToolbarHeight = fragment.getTopToolbarHeight()
- 
--        assertEquals(120, topToolbarHeight)
-+        assertEquals(104, topToolbarHeight)
-     }
- 
-     @Test
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt
 index 4f2b7c1f10b..905ef44472c 100644
 --- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt
