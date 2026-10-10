@@ -34,7 +34,7 @@ jobs:
     env:
       FIREFOX_VERSION: ${{ inputs.version || 'stable' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Scarica Fenix (solo mobile/android/fenix)
         run: chrome-tabstrip/scripts/fetch-firefox.sh "$RUNNER_TEMP/firefox" --fenix
@@ -57,7 +57,7 @@ jobs:
             /usr/local/share/boost /usr/local/.ghcup "$AGENT_TOOLSDIRECTORY"
           df -h /
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Ripristina la chiave di firma
         env:
