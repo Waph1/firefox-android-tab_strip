@@ -47,15 +47,11 @@ info "Preparo l'ambiente di compilazione (JDK, Android SDK)..."
     --application-choice="GeckoView/Firefox for Android Artifact Mode" \
     --no-system-changes
 
-JDK_DIR="$(find "$MOZBUILD_STATE_PATH/jdk" -mindepth 1 -maxdepth 1 -type d -name 'jdk-*' | sort -V | tail -1)"
-[ -n "$JDK_DIR" ] && export JAVA_HOME="$JDK_DIR"
-SDK_DIR="$(find "$MOZBUILD_STATE_PATH" -mindepth 1 -maxdepth 1 -type d -name 'android-sdk-*' | head -1)"
-[ -n "$SDK_DIR" ] && export ANDROID_HOME="$SDK_DIR"
-
 info "Scarico i binari di Gecko e preparo il build (./mach build)..."
 ./mach build
 
-TASK="fenix:assemble${VARIANT^}"
+# Es. "nightly" -> "fenix:assembleNightly" (senza ${VARIANT^}, che non esiste nella bash 3 di macOS).
+TASK="fenix:assemble$(printf '%s' "${VARIANT:0:1}" | tr '[:lower:]' '[:upper:]')${VARIANT:1}"
 info "Compilo Fenix ($TASK)..."
 ./mach gradle "$TASK"
 

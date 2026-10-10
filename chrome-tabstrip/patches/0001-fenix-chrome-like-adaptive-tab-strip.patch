@@ -1,5 +1,5 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
-index 447a7ff12b..6fd097a8f9 100644
+index 447a7ff12b2..6fd097a8f91 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
 @@ -112,6 +112,7 @@ import org.mozilla.fenix.browser.BrowserFragmentDirections
@@ -32,7 +32,7 @@ index 447a7ff12b..6fd097a8f9 100644
  
          // Diagnostic breadcrumb for "Display already aquired" crash:
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
-index ed334079e8..73fae3e343 100644
+index ed334079e81..73fae3e3437 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
 @@ -1542,9 +1542,18 @@ abstract class BaseBrowserFragment :
@@ -58,7 +58,7 @@ index ed334079e8..73fae3e343 100644
              null
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStrip.kt
 new file mode 100644
-index 0000000000..dc85d3a292
+index 00000000000..dc85d3a2922
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStrip.kt
 @@ -0,0 +1,105 @@
@@ -169,7 +169,7 @@ index 0000000000..dc85d3a292
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
 new file mode 100644
-index 0000000000..63262feabe
+index 00000000000..63262feabe8
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
 @@ -0,0 +1,724 @@
@@ -898,7 +898,7 @@ index 0000000000..63262feabe
 +            drawRect(brush = brush, blendMode = BlendMode.DstIn)
 +        }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
-index 8155be98d7..91f7571e04 100644
+index 8155be98d74..91f7571e04c 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
 @@ -182,8 +182,9 @@ fun TabStrip(
@@ -913,7 +913,7 @@ index 8155be98d7..91f7571e04 100644
              colors = tabStripColors,
              onAddTabClick = createAddTabClickHandler(onAddTabClick),
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripState.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripState.kt
-index b57f3a1f22..c92339911e 100644
+index b57f3a1f225..c92339911e0 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripState.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripState.kt
 @@ -48,6 +48,7 @@ data class TabStripState(
@@ -940,7 +940,7 @@ index b57f3a1f22..c92339911e 100644
      )
  }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserNavigationBar.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserNavigationBar.kt
-index 10396db381..349f598ac1 100644
+index 10396db381d..349f598ac1e 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserNavigationBar.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserNavigationBar.kt
 @@ -28,6 +28,7 @@ import mozilla.components.compose.browser.toolbar.store.ToolbarGravity.Top
@@ -980,7 +980,7 @@ index 10396db381..349f598ac1 100644
              if (hideWhenKeyboardShown) {
                  val keyboardState by keyboardAsState()
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
-index 3f14f1e68c..3295df206f 100644
+index 3f14f1e68c4..3295df206f3 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
 @@ -9,6 +9,7 @@ import android.view.View
@@ -1041,7 +1041,7 @@ index 3f14f1e68c..3295df206f 100644
                                                  tabStripContent()
                                              }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarMiddleware.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarMiddleware.kt
-index 7500c18a76..21e4dd9570 100644
+index 7500c18a76b..21e4dd9570b 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarMiddleware.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarMiddleware.kt
 @@ -14,6 +14,8 @@ import kotlinx.coroutines.CoroutineScope
@@ -1074,7 +1074,7 @@ index 7500c18a76..21e4dd9570 100644
                      updateStartBrowserActions(store)
                      updateEndBrowserActions(store)
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/BrowserToolbarMiddleware.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/BrowserToolbarMiddleware.kt
-index 9c8c89423b..95b974237f 100644
+index 9c8c89423b2..95b974237f8 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/BrowserToolbarMiddleware.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/BrowserToolbarMiddleware.kt
 @@ -15,6 +15,8 @@ import kotlinx.coroutines.CoroutineScope
@@ -1107,7 +1107,7 @@ index 9c8c89423b..95b974237f 100644
                      updateStartBrowserActions(store)
                      updateEndBrowserActions(store)
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeNavigationBar.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeNavigationBar.kt
-index 0b340f4634..778cd501a8 100644
+index 0b340f46340..778cd501a8e 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeNavigationBar.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeNavigationBar.kt
 @@ -17,6 +17,7 @@ import mozilla.components.compose.browser.toolbar.store.ToolbarGravity.Top
@@ -1130,7 +1130,7 @@ index 0b340f4634..778cd501a8 100644
              if (hideWhenKeyboardShown) {
                  val keyboardState by keyboardAsState()
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
-index fe54f0c099..ed39c0a67b 100644
+index fe54f0c099d..ed39c0a67b1 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
 @@ -46,6 +46,7 @@ import mozilla.components.compose.browser.toolbar.ui.BrowserToolbarQuery
@@ -1181,7 +1181,7 @@ index fe54f0c099..ed39c0a67b 100644
                  (settings.shouldShowTabStripAtBottom || settings.shouldShowTabGroupsStrip)
          }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
-index 1956c4ef6f..9a2976c791 100644
+index 1956c4ef6f2..9a2976c7915 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
 @@ -304,11 +304,11 @@ class CustomizationFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFrag
@@ -1208,7 +1208,7 @@ index 1956c4ef6f..9a2976c791 100644
          requirePreference<PreferenceCategory>(R.string.pref_key_tab_strip_location).isVisible = isTabStripEnabled
          if (!isTabStripEnabled) return
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt
-index dbcf87fe9d..c21c151a16 100644
+index dbcf87fe9d4..c21c151a166 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt
 @@ -71,8 +71,11 @@ class StatusBarColorManager(
@@ -1226,7 +1226,7 @@ index dbcf87fe9d..c21c151a16 100644
              }
  
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/TabStripStatusBarView.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/TabStripStatusBarView.kt
-index 22f6ecba25..cb2a565289 100644
+index 22f6ecba25f..cb2a5652898 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/TabStripStatusBarView.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/TabStripStatusBarView.kt
 @@ -20,6 +20,7 @@ import androidx.compose.ui.platform.ComposeView
@@ -1262,7 +1262,7 @@ index 22f6ecba25..cb2a565289 100644
                  }
              }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
-index 14b8faaa9d..005694bd4e 100644
+index 14b8faaa9dc..005694bd4ea 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
 @@ -30,7 +30,6 @@ import mozilla.components.lib.crash.store.CrashReportOption
@@ -1333,7 +1333,7 @@ index 14b8faaa9d..005694bd4e 100644
      private fun isAddressFeatureEnabled(context: Context): Boolean {
          val locale = LocaleManager.getCurrentLocale(context) ?: LocaleManager.getSystemDefault()
 diff --git a/mobile/android/fenix/app/src/main/res/values/dimens.xml b/mobile/android/fenix/app/src/main/res/values/dimens.xml
-index 0d898d8c48..69565fee62 100644
+index 0d898d8c48d..69565fee628 100644
 --- a/mobile/android/fenix/app/src/main/res/values/dimens.xml
 +++ b/mobile/android/fenix/app/src/main/res/values/dimens.xml
 @@ -66,7 +66,7 @@
@@ -1347,7 +1347,7 @@ index 0d898d8c48..69565fee62 100644
  
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt
 new file mode 100644
-index 0000000000..34465b7470
+index 00000000000..34465b74708
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt
 @@ -0,0 +1,91 @@
@@ -1442,8 +1442,81 @@ index 0000000000..34465b7470
 +        assertFalse(settings.isTabStripEnabled)
 +    }
 +}
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/TabStripModeToggleTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/TabStripModeToggleTest.kt
+new file mode 100644
+index 00000000000..210e7b080a7
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/TabStripModeToggleTest.kt
+@@ -0,0 +1,67 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.browser.tabstrip
++
++import mozilla.components.browser.state.state.BrowserState
++import mozilla.components.browser.state.state.createTab
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNull
++import org.junit.Test
++
++class TabStripModeToggleTest {
++
++    @Test
++    fun `GIVEN only normal tabs WHEN showing normal tabs THEN there is no private mode toggle`() {
++        val browserState =
++            BrowserState(
++                tabs =
++                    listOf(
++                        createTab(id = "1", url = "https://www.mozilla.org"),
++                        createTab(id = "2", url = "https://www.example.com"),
++                    ),
++                selectedTabId = "1",
++            )
++
++        assertNull(browserState.toTabStripModeToggle(isPrivateMode = false))
++    }
++
++    @Test
++    fun `GIVEN private tabs WHEN showing normal tabs THEN the toggle selects the last used private tab`() {
++        val browserState =
++            BrowserState(
++                tabs =
++                    listOf(
++                        createTab(id = "1", url = "https://www.mozilla.org"),
++                        createTab(id = "p1", url = "https://www.example.com", private = true, lastAccess = 10),
++                        createTab(id = "p2", url = "https://www.firefox.com", private = true, lastAccess = 20),
++                    ),
++                selectedTabId = "1",
++            )
++
++        assertEquals(
++            TabStripModeToggle(tabId = "p2", url = "https://www.firefox.com"),
++            browserState.toTabStripModeToggle(isPrivateMode = false),
++        )
++    }
++
++    @Test
++    fun `GIVEN normal tabs WHEN showing private tabs THEN the toggle selects the last used normal tab`() {
++        val browserState =
++            BrowserState(
++                tabs =
++                    listOf(
++                        createTab(id = "1", url = "https://www.mozilla.org", lastAccess = 30),
++                        createTab(id = "2", url = "https://www.example.com", lastAccess = 5),
++                        createTab(id = "p1", url = "https://www.firefox.com", private = true),
++                    ),
++                selectedTabId = "p1",
++            )
++
++        assertEquals(
++            TabStripModeToggle(tabId = "1", url = "https://www.mozilla.org"),
++            browserState.toTabStripModeToggle(isPrivateMode = true),
++        )
++    }
++}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt
-index 4f2b7c1f10..905ef44472 100644
+index 4f2b7c1f10b..905ef44472c 100644
 --- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt
 @@ -208,7 +208,7 @@ class StatusBarColorManagerTest {

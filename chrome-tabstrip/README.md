@@ -107,6 +107,14 @@ modifiche, con un **merge a 3 vie**. Se restano conflitti:
 
 Per verificare senza modificare nulla: `chrome-tabstrip/scripts/apply.sh ~/firefox --check`.
 
+Per eseguire i test unitari della patch (dopo `build.sh`):
+
+```bash
+cd ~/firefox
+MOZCONFIG=$PWD/mozconfig-chrome-tabstrip ./mach gradle fenix:testDebugUnitTest \
+    --tests 'org.mozilla.fenix.browser.tabstrip.*' --tests 'org.mozilla.fenix.theme.StatusBarColorManagerTest'
+```
+
 Per seguire Beta o Release invece di Nightly: `UPSTREAM_BRANCH=beta chrome-tabstrip/scripts/fetch-firefox.sh ...`
 (i rami disponibili sono quelli di [mozilla-firefox/firefox](https://github.com/mozilla-firefox/firefox/branches)).
 
@@ -124,8 +132,8 @@ Note:
 - le esecuzioni pianificate di GitHub partono solo dal ramo predefinito del repository: per averle, porta il
   workflow e la cartella `chrome-tabstrip/` su `main`;
 - per avere APK aggiornabili l'uno sopra l'altro, salva la tua chiave di debug come secret
-  `ANDROID_DEBUG_KEYSTORE_BASE64` (`base64 -w0 ~/.android/debug.keystore`); senza secret ogni build ha una chiave
-  diversa.
+  `ANDROID_DEBUG_KEYSTORE_BASE64` (`base64 -w0 ~/.android/debug.keystore`, su macOS `base64 -i ~/.android/debug.keystore`);
+  senza secret ogni build ha una chiave diversa.
 
 ## Cosa tocca la patch
 
