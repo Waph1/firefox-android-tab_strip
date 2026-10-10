@@ -12,6 +12,34 @@ e, quando capitano, facili da risolvere.
 > ma in [`mozilla-firefox/firefox`](https://github.com/mozilla-firefox/firefox) sotto `mobile/android/`. La patch va
 > quindi applicata a quel repository; gli script qui sotto lo scaricano per te.
 
+## Senza PC: APK pronti da scaricare dal telefono
+
+Non serve un computer: GitHub compila l'APK da solo e lo pubblica nelle
+[**Release**](https://github.com/Waph1/firefox-android-tab_strip/releases) di questo repository. Ogni giorno
+controlla se è uscita una nuova versione stabile di Firefox per Android e, se sì, pubblica la nuova versione con la
+patch (la compilazione richiede circa un'ora).
+
+**Configurazione (una volta sola, dal browser del telefono):** gli APK devono essere firmati sempre con la stessa
+chiave, altrimenti gli aggiornamenti non si installano. La chiave viene generata da GitHub alla prima compilazione e
+salvata nel repository **cifrata**; per cifrarla e decifrarla serve una password che conosce solo GitHub:
+
+1. apri <https://github.com/Waph1/firefox-android-tab_strip/settings/secrets/actions/new> (se sul telefono non si
+   apre, usa «Visualizza sito desktop» nel browser);
+2. **Name:** `APK_SIGNING_PASSWORD`;
+3. **Secret:** una password lunga e casuale, **almeno 20 caratteri** (ad es. quella suggerita dal gestore di password
+   del telefono). Non devi ricordarla, ma non cancellare né cambiare il secret: senza quella password la chiave non
+   è più utilizzabile e per aggiornare bisognerebbe disinstallare l'app;
+4. **Add secret**.
+
+Dal giorno dopo (o subito: **Actions → Chrome-like tab strip → Run workflow → Run workflow**) compare la prima
+Release. Per installarla dal telefono: apri la Release, scarica il file `.apk`, aprilo e consenti l'installazione.
+Il Firefox del Play Store va prima disinstallato (ha una firma diversa): sincronizza prima i dati con il tuo account
+Mozilla. Per gli aggiornamenti successivi basta scaricare e installare l'APK della nuova Release.
+
+Se una nuova versione di Firefox cambia il codice toccato dalla patch, la compilazione fallisce e GitHub ti manda
+un'e-mail: la patch va aggiornata (vedi «Quando esce una nuova versione di Firefox»), finché resta disponibile
+l'ultima Release funzionante.
+
 ## Cosa cambia
 
 ### Comparsa automatica, come in Chrome (pieghevoli, tablet, multi-finestra)
@@ -106,44 +134,15 @@ Varianti di `build.sh` (secondo argomento):
   utile per provare la patch tenendo il Firefox del Play Store.
 - `debug`: più lenta, si installa come app separata (`org.mozilla.fenix.debug`), per sviluppo.
 
-## Chiave di firma e secret di GitHub
+## Chiave di firma
 
-Android accetta un aggiornamento solo se è firmato con la **stessa chiave** della versione installata. Gli APK sono
-firmati con la chiave di debug di Android, `~/.android/debug.keystore`, creata automaticamente alla prima
-compilazione: **conservala** (fanne una copia di sicurezza), altrimenti per aggiornare dovrai disinstallare
-l'app perdendo i dati.
+Android accetta un aggiornamento solo se è firmato con la **stessa chiave** della versione installata.
 
-Se compili con GitHub Actions, la stessa chiave va salvata come *secret* del repository, così anche gli APK
-compilati da GitHub si installano sopra quelli precedenti:
-
-1. Sul computer dove hai compilato (o su qualsiasi computer con un JDK, se non hai ancora compilato) esegui:
-
-   ```bash
-   chrome-tabstrip/scripts/signing-key.sh
-   ```
-
-   Usa `~/.android/debug.keystore` se esiste (altrimenti ne crea una nuova) e scrive la chiave in formato testo
-   (base64) nel file `~/.android/debug.keystore.base64`.
-
-2. Su GitHub apri il repository → **Settings** → **Secrets and variables** → **Actions** →
-   **New repository secret** (per questo repository:
-   <https://github.com/Waph1/firefox-android-tab_strip/settings/secrets/actions/new>).
-
-3. In **Name** scrivi `ANDROID_DEBUG_KEYSTORE_BASE64`, in **Secret** incolla **tutto** il contenuto di
-   `~/.android/debug.keystore.base64` (su macOS: `pbcopy < ~/.android/debug.keystore.base64` lo copia negli
-   appunti; su Linux aprilo con un editor di testo), poi **Add secret**.
-
-   In alternativa, con la [GitHub CLI](https://cli.github.com/) già autenticata:
-
-   ```bash
-   gh secret set ANDROID_DEBUG_KEYSTORE_BASE64 --repo Waph1/firefox-android-tab_strip < ~/.android/debug.keystore.base64
-   ```
-
-4. Cancella `~/.android/debug.keystore.base64` (il secret è salvato cifrato su GitHub e non è più leggibile,
-   nemmeno da te: per questo serve la copia di sicurezza del file `debug.keystore`).
-
-Il workflow ripristina la chiave dal secret prima di compilare; se il secret manca, compila comunque ma con una
-chiave nuova a ogni esecuzione (e te lo segnala con un avviso).
+- **APK compilati da GitHub** (sezione «Senza PC»): la chiave è in `chrome-tabstrip/signing/debug.keystore.enc`,
+  cifrata con AES-256 e la password del secret `APK_SIGNING_PASSWORD`; il file da solo non serve a nulla.
+- **APK compilati sul tuo computer**: sono firmati con la chiave di debug di Android, `~/.android/debug.keystore`,
+  creata automaticamente alla prima compilazione. Conservala (fanne una copia di sicurezza). Le due chiavi sono
+  diverse: non mescolare APK compilati da GitHub e dal computer sullo stesso telefono.
 
 ## Quando esce una nuova versione di Firefox
 
@@ -178,14 +177,15 @@ MOZCONFIG=$PWD/mozconfig-chrome-tabstrip ./mach gradle fenix:testDebugUnitTest \
 
 Il workflow [`.github/workflows/chrome-tabstrip.yml`](../.github/workflows/chrome-tabstrip.yml):
 
-- **ogni giorno** verifica che la patch si applichi ancora all'ultima versione stabile di Firefox: quando esce una
-  nuova versione che la rompe, GitHub ti avvisa via e-mail e sai che è ora di aggiornarla;
-- su richiesta (**Actions → Chrome-like tab strip → Run workflow**, opzione *build*) compila anche l'APK e lo
-  allega all'esecuzione come artifact da scaricare (`firefox-<versione>-chrome-tabstrip-release`).
+- **ogni giorno** controlla l'ultima versione stabile di Firefox per Android: se la patch non si applica più, GitHub
+  ti avvisa via e-mail; se si applica e quella versione non è ancora nelle Release, compila l'APK e lo pubblica;
+- a ogni push che modifica la patch o gli script verifica che la patch si applichi;
+- a mano (**Actions → Chrome-like tab strip → Run workflow**) fa le stesse cose; con *mode = test* compila con una
+  chiave temporanea e allega l'APK all'esecuzione invece di pubblicarlo (utile per provare una versione diversa
+  con *version*, es. `beta`).
 
-GitHub mostra il pulsante *Run workflow* e avvia le esecuzioni pianificate solo per i workflow presenti nel ramo
-predefinito: porta il workflow e la cartella `chrome-tabstrip/` su `main` (finché stanno solo su un altro ramo, il
-controllo parte comunque a ogni push che li modifica).
+GitHub esegue le attività pianificate solo dal ramo predefinito (`main`) e le sospende dopo 60 giorni senza
+modifiche al repository: in quel caso ti manda un'e-mail e basta riattivarle da **Actions**.
 
 ## Cosa tocca la patch
 

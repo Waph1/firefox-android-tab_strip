@@ -1,5 +1,12 @@
-# Verifica ogni giorno che la patch "tab strip in stile Chrome" si applichi ancora all'ultima versione stabile
-# di Firefox per Android e, su richiesta, compila l'APK. Vedi chrome-tabstrip/README.md.
+# Firefox per Android con la tab strip in stile Chrome (vedi chrome-tabstrip/README.md).
+#
+# - Ogni giorno: controlla l'ultima versione stabile di Firefox per Android; se non è ancora stata pubblicata
+#   nelle Release di questo repository, applica la patch, compila l'APK e lo pubblica come nuova Release.
+# - A ogni push che modifica la patch o gli script: verifica che la patch si applichi ancora.
+# - A mano (Actions → Chrome-like tab strip → Run workflow): stesse operazioni, con qualche opzione in più.
+#
+# Gli APK pubblicati sono firmati con una chiave salvata cifrata nel repository: serve il secret
+# APK_SIGNING_PASSWORD (una password lunga e casuale) per decifrarla, o crearla alla prima esecuzione.
 name: Chrome-like tab strip
 
 on:
@@ -11,17 +18,22 @@ on:
       - ".github/workflows/chrome-tabstrip.yml"
   workflow_dispatch:
     inputs:
-      version:
-        description: "Versione di Firefox: stable (ultima stabile), beta, main (Nightly) o un tag FIREFOX-ANDROID_..."
-        required: true
-        default: stable
-      build:
-        description: "Compila anche l'APK (richiede circa un'ora)"
+      mode:
+        description: "release = pubblica l'APK nelle Release; test = compila con una chiave temporanea, senza pubblicare"
+        type: choice
+        options: [release, test]
+        default: release
+      force:
+        description: "Ricompila e ripubblica anche se la release di questa versione esiste già"
         type: boolean
         default: false
+      version:
+        description: "Versione di Firefox (solo per test): stable, beta, main o un tag FIREFOX-ANDROID_..."
+        default: stable
       variant:
-        description: "Variante dell'APK: release (Firefox), nightly (Firefox Nightly) o debug"
-        required: true
+        description: "Variante: release (app «Firefox»), nightly (app separata «Firefox Nightly») o debug"
+        type: choice
+        options: [release, nightly, debug]
         default: release
 
 permissions:
@@ -43,50 +55,115 @@ jobs:
         run: chrome-tabstrip/scripts/apply.sh "$RUNNER_TEMP/firefox" --check
 
   build:
-    name: Compila l'APK
+    name: Compila e pubblica l'APK
     needs: check
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build }}
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 300
+    concurrency:
+      group: chrome-tabstrip-build
+      cancel-in-progress: false
+    permissions:
+      contents: write
     env:
-      FIREFOX_VERSION: ${{ inputs.version }}
+      FIREFOX_VERSION: ${{ inputs.version || 'stable' }}
+      MODE: ${{ inputs.mode || 'release' }}
+      VARIANT: ${{ inputs.variant || 'release' }}
+      GH_TOKEN: ${{ github.token }}
+      # Il compilatore Kotlin gira dentro Gradle invece che in un processo separato: usa meno memoria.
+      GRADLE_FLAGS: -Pkotlin.compiler.execution.strategy=in-process --max-workers=2
+      PRUNE_EMULATOR: "1"
     steps:
-      - name: Libera spazio su disco
+      - uses: actions/checkout@v5
+
+      - name: Decidi cosa fare
+        id: plan
+        env:
+          FORCE: ${{ inputs.force || false }}
+          HAS_KEY: ${{ secrets.APK_SIGNING_PASSWORD != '' }}
+          EVENT: ${{ github.event_name }}
+        run: chrome-tabstrip/scripts/ci-plan.sh
+
+      - name: Prepara la chiave di firma
+        if: ${{ steps.plan.outputs.build == 'true' && env.MODE == 'release' }}
+        env:
+          APK_SIGNING_PASSWORD: ${{ secrets.APK_SIGNING_PASSWORD }}
+        run: chrome-tabstrip/scripts/ci-signing-key.sh
+
+      - name: Prepara spazio su disco e memoria
+        if: ${{ steps.plan.outputs.build == 'true' }}
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL \
             /usr/local/share/boost /usr/local/.ghcup "$AGENT_TOOLSDIRECTORY"
-          df -h /
-
-      - uses: actions/checkout@v5
-
-      - name: Ripristina la chiave di firma
-        env:
-          KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
-        run: |
-          if [ -n "$KEYSTORE" ]; then
-            mkdir -p ~/.android
-            echo "$KEYSTORE" | base64 -d > ~/.android/debug.keystore
-            echo "Uso la chiave di debug salvata nei secret."
-          else
-            echo "::warning::Secret ANDROID_DEBUG_KEYSTORE_BASE64 assente: l'APK avrà una chiave nuova."
+          # Lavora sul disco più capiente tra / e /mnt.
+          WORK="$RUNNER_TEMP/work"
+          if [ -d /mnt ] && [ "$(df --output=avail -k /mnt | tail -1)" -gt "$(df --output=avail -k / | tail -1)" ]; then
+            WORK=/mnt/work
           fi
+          sudo mkdir -p "$WORK" && sudo chown "$USER" "$WORK"
+          {
+            echo "WORK=$WORK"
+            echo "MOZBUILD_STATE_PATH=$WORK/mozbuild"
+            echo "GRADLE_USER_HOME=$WORK/gradle"
+          } >> "$GITHUB_ENV"
+          # Un po' di swap evita che la compilazione venga interrotta per mancanza di memoria.
+          sudo fallocate -l 8G "$WORK/swapfile" && sudo chmod 600 "$WORK/swapfile" &&
+            sudo mkswap "$WORK/swapfile" && sudo swapon "$WORK/swapfile" || true
+          df -h / /mnt; free -h
 
       - name: Scarica Firefox
+        if: ${{ steps.plan.outputs.build == 'true' }}
         run: |
-          chrome-tabstrip/scripts/fetch-firefox.sh "$RUNNER_TEMP/firefox"
-          echo "FX_VERSION=$(cat "$RUNNER_TEMP/firefox/mobile/android/version.txt")" >> "$GITHUB_ENV"
+          chrome-tabstrip/scripts/fetch-firefox.sh "$WORK/firefox"
+          echo "FX_VERSION=$(cat "$WORK/firefox/mobile/android/version.txt")" >> "$GITHUB_ENV"
 
       - name: Applica la patch
-        run: chrome-tabstrip/scripts/apply.sh "$RUNNER_TEMP/firefox"
+        if: ${{ steps.plan.outputs.build == 'true' }}
+        run: chrome-tabstrip/scripts/apply.sh "$WORK/firefox"
 
       - name: Compila
-        env:
-          PRUNE_EMULATOR: "1"
-          VARIANT: ${{ inputs.variant }}
-        run: chrome-tabstrip/scripts/build.sh "$RUNNER_TEMP/firefox" "$VARIANT"
+        if: ${{ steps.plan.outputs.build == 'true' }}
+        run: chrome-tabstrip/scripts/build.sh "$WORK/firefox" "$VARIANT"
 
-      - uses: actions/upload-artifact@v4
+      - name: Prepara l'APK
+        if: ${{ steps.plan.outputs.build == 'true' }}
+        run: |
+          APK="$(find "$WORK/firefox/objdir-chrome-tabstrip/gradle/build/mobile/android/fenix/app/outputs/apk/$VARIANT" \
+            -name '*arm64-v8a*.apk' | head -1)"
+          [ -n "$APK" ] || { echo "APK non trovato"; exit 1; }
+          OUT="$RUNNER_TEMP/firefox-$FX_VERSION-tabstrip-$VARIANT-arm64-v8a.apk"
+          cp "$APK" "$OUT"
+          echo "APK=$OUT" >> "$GITHUB_ENV"
+          ls -la "$OUT"
+
+      - name: Pubblica la release
+        if: ${{ steps.plan.outputs.build == 'true' && env.MODE == 'release' }}
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          cat > "$RUNNER_TEMP/notes.md" <<EOF
+          Firefox per Android **$FX_VERSION** (versione stabile) con la tab strip in stile Chrome, che compare e
+          scompare aprendo e chiudendo il telefono pieghevole.
+
+          **Come installarlo dal telefono**
+          1. Scarica qui sotto il file \`$(basename "$APK")\`.
+          2. Aprilo e consenti l'installazione di app da questa fonte se Android lo chiede.
+          3. Se hai il Firefox del Play Store, va prima disinstallato (firma diversa): sincronizza prima i dati
+             con il tuo account Mozilla. Gli aggiornamenti successivi pubblicati qui si installano sopra questo.
+
+          Patch: [chrome-tabstrip](https://github.com/$GITHUB_REPOSITORY/tree/$GITHUB_SHA/chrome-tabstrip)
+          EOF
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes --cleanup-tag
+          fi
+          gh release create "$TAG" "$APK" --target "$GITHUB_SHA" \
+            --title "Firefox $FX_VERSION con tab strip in stile Chrome" --notes-file "$RUNNER_TEMP/notes.md"
+          echo "✅ Pubblicato: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Allega l'APK all'esecuzione (modalità test)
+        if: ${{ steps.plan.outputs.build == 'true' && env.MODE == 'test' }}
+        uses: actions/upload-artifact@v4
         with:
-          name: firefox-${{ env.FX_VERSION }}-chrome-tabstrip-${{ inputs.variant }}
-          path: ${{ runner.temp }}/firefox/objdir-chrome-tabstrip/gradle/build/mobile/android/fenix/app/outputs/apk/**/*.apk
+          name: firefox-${{ env.FX_VERSION }}-tabstrip-${{ env.VARIANT }}-test
+          path: ${{ env.APK }}
           if-no-files-found: error
