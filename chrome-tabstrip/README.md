@@ -131,8 +131,9 @@ Il workflow [`.github/workflows/chrome-tabstrip.yml`](../.github/workflows/chrom
 
 Note:
 
-- le esecuzioni pianificate di GitHub partono solo dal ramo predefinito del repository: per averle, porta il
-  workflow e la cartella `chrome-tabstrip/` su `main`;
+- GitHub mostra il pulsante *Run workflow* e avvia le esecuzioni pianificate solo per i workflow presenti nel ramo
+  predefinito: porta il workflow e la cartella `chrome-tabstrip/` su `main` (finché stanno solo su un altro ramo, il
+  controllo parte comunque a ogni push che li modifica);
 - per avere APK aggiornabili l'uno sopra l'altro, salva la tua chiave di debug come secret
   `ANDROID_DEBUG_KEYSTORE_BASE64` (`base64 -w0 ~/.android/debug.keystore`, su macOS `base64 -i ~/.android/debug.keystore`);
   senza secret ogni build ha una chiave diversa.
