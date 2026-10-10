@@ -1515,6 +1515,28 @@ index 00000000000..210e7b080a7
 +        )
 +    }
 +}
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/ext/FragmentTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/ext/FragmentTest.kt
+index 96fdcef1666..6e5710c9582 100644
+--- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/ext/FragmentTest.kt
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/ext/FragmentTest.kt
+@@ -197,7 +197,7 @@ class FragmentTest {
+ 
+         val bottomToolbarHeight = fragment.getBottomToolbarHeight()
+ 
+-        assertEquals(291, bottomToolbarHeight)
++        assertEquals(275, bottomToolbarHeight)
+     }
+ 
+     @Test
+@@ -219,7 +219,7 @@ class FragmentTest {
+ 
+         val topToolbarHeight = fragment.getTopToolbarHeight()
+ 
+-        assertEquals(120, topToolbarHeight)
++        assertEquals(104, topToolbarHeight)
+     }
+ 
+     @Test
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt
 index 4f2b7c1f10b..905ef44472c 100644
 --- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt

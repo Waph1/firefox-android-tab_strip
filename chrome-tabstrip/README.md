@@ -145,7 +145,7 @@ File nuovi (`mobile/android/fenix/app/src/...`):
   tab strip; è uno stato Compose aggiornato da `HomeActivity` a ogni cambio di configurazione (piega/apertura,
   rotazione, multi-finestra), così l'interfaccia si ricompone da sola.
 - `browser/tabstrip/ChromeStyleTabStrip.kt` — la nuova tab strip in stile Chrome.
-- `test/.../browser/tabstrip/AdaptiveTabStripTest.kt` — test unitari.
+- `test/.../browser/tabstrip/AdaptiveTabStripTest.kt`, `TabStripModeToggleTest.kt` — test unitari.
 
 Modifiche piccole ai file esistenti:
 
@@ -160,7 +160,7 @@ Modifiche piccole ai file esistenti:
 - `StatusBarColorManager.kt`, `TabStripStatusBarView.kt` — il gradiente della status bar segue la strip.
 - `CustomizationFragment.kt` — l'interruttore nelle impostazioni usa la preferenza utente.
 - `TabStrip.kt` (usa `ChromeStyleTabStripContent`), `TabStripState.kt` (stato di caricamento), `dimens.xml`
-  (altezza 40dp), `StatusBarColorManagerTest.kt`.
+  (altezza 40dp), `StatusBarColorManagerTest.kt` e `FragmentTest.kt` (adeguati alle modifiche).
 
 ## Differenze rispetto a Chrome
 
