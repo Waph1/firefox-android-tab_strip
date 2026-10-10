@@ -1,0 +1,1457 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
+index 447a7ff12b..6fd097a8f9 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
+@@ -112,6 +112,7 @@ import org.mozilla.fenix.browser.BrowserFragmentDirections
+ import org.mozilla.fenix.browser.browsingmode.BrowsingMode
+ import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
+ import org.mozilla.fenix.browser.browsingmode.DefaultBrowsingModeManager
++import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
+ import org.mozilla.fenix.components.DefaultHomepageAsANewTabPreferenceRepository
+ import org.mozilla.fenix.components.DefaultShortcutManagerCompatWrapper
+ import org.mozilla.fenix.components.accounts.FenixFxAEntryPoint
+@@ -476,6 +477,9 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+             browsingModeManager = createBrowsingModeManager(intent)
+             setupTheme()
+ 
++            // Decide if the window is large enough for the tab strip before any fragment is restored.
++            AdaptiveTabStrip.onWindowChanged(this)
++
+             super.onCreate(savedInstanceState)
+         }
+ 
+@@ -1022,6 +1026,10 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+     }
+ 
+     final override fun onConfigurationChanged(newConfig: Configuration) {
++        // Update the tab strip visibility (e.g. a foldable was folded / unfolded) before the fragments are notified,
++        // so they lay themselves out with the new toolbar height.
++        AdaptiveTabStrip.onWindowChanged(this, newConfig)
++
+         super.onConfigurationChanged(newConfig)
+ 
+         // Diagnostic breadcrumb for "Display already aquired" crash:
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
+index ed334079e8..73fae3e343 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
+@@ -1542,9 +1542,18 @@ abstract class BaseBrowserFragment :
+         appStore: AppStore,
+         settings: org.mozilla.fenix.utils.Settings,
+     ) =
+-        if (customTabSessionId == null && settings.shouldShowTabStripAtTop && settings.shouldUseBottomToolbar) {
++        if (
++            customTabSessionId == null &&
++                settings.isTabStripPreferenceEnabled &&
++                !settings.shouldUseBottomTabStrip &&
++                settings.shouldUseBottomToolbar
++        ) {
++            // Created even when the window is currently too small for the tab strip so that it can appear as soon as
++            // the window grows (e.g. when a foldable is unfolded).
+             BrowserTabStrip(context, binding.browserLayout, settings) {
+-                buildTabStrip(appStore, settings)()
++                if (settings.shouldShowTabStripAtTop) {
++                    buildTabStrip(appStore, settings)()
++                }
+             }
+         } else {
+             null
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStrip.kt
+new file mode 100644
+index 0000000000..dc85d3a292
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStrip.kt
+@@ -0,0 +1,105 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.browser.tabstrip
++
++import android.content.Context
++import android.content.res.Configuration
++import androidx.annotation.VisibleForTesting
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.setValue
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.flow.asStateFlow
++import org.mozilla.fenix.ext.TALL_SCREEN_HEIGHT_DP
++import org.mozilla.fenix.ext.WIDE_SCREEN_WIDTH_DP
++import org.mozilla.fenix.utils.isLargeScreenSize
++
++/**
++ * Decides, like Chrome for Android does, whether the current window is large enough to show the tab strip.
++ *
++ * The tab strip is shown when:
++ * - the screen the app is currently displayed on is a "tablet" screen, i.e. its smallest width is at least 600dp, the
++ *   same threshold as Chrome's `DeviceFormFactor.MINIMUM_TABLET_WIDTH_DP` (tablets, the inner screen of an unfolded
++ *   foldable like the Galaxy Z Fold, but not its cover screen), and
++ * - the app window is at least [MIN_WINDOW_WIDTH_DP] wide (so it hides in narrow split-screen or pop-up windows).
++ *
++ * Foldables switch screen when they are folded / unfolded and `HomeActivity` handles those configuration changes
++ * itself (no activity recreation), so `HomeActivity` calls [onWindowChanged] from `onCreate` and
++ * `onConfigurationChanged`. The value is backed by Compose snapshot state, so every composable reading it (directly or
++ * through `Settings.isTabStripEnabled`) recomposes and shows / hides the tab strip immediately. Non Compose code can
++ * observe [windowLayout].
++ */
++object AdaptiveTabStrip {
++    /** Same threshold Chrome uses to hide its tab strip in narrow windows. */
++    const val MIN_WINDOW_WIDTH_DP = 412
++
++    /**
++     * Coarse description of the current window, used to know when the toolbars need to be rebuilt.
++     *
++     * @property isTabStripAllowed Whether the window is large enough to show the tab strip.
++     * @property isWideWindow Whether the window is wider than [WIDE_SCREEN_WIDTH_DP].
++     * @property isTallWindow Whether the window is taller than [TALL_SCREEN_HEIGHT_DP].
++     */
++    data class WindowLayout(
++        val isTabStripAllowed: Boolean,
++        val isWideWindow: Boolean,
++        val isTallWindow: Boolean,
++    )
++
++    // Until a window reports its size, defer to the user preference only.
++    private var tabStripAllowedState by mutableStateOf(true)
++
++    private val windowLayoutFlow =
++        MutableStateFlow(
++            WindowLayout(
++                isTabStripAllowed = true,
++                isWideWindow = false,
++                isTallWindow = true,
++            ),
++        )
++
++    /** Whether the current window is large enough to show the tab strip. Backed by Compose snapshot state. */
++    val isTabStripAllowed: Boolean
++        get() = tabStripAllowedState
++
++    /** [StateFlow] emitting every time the coarse [WindowLayout] of the app window changes. */
++    val windowLayout: StateFlow<WindowLayout> = windowLayoutFlow.asStateFlow()
++
++    /**
++     * Updates the state from the window of [context] (the activity hosting the browser).
++     *
++     * @param context The [Context] of the activity hosting the tab strip.
++     * @param configuration The current [Configuration] of that activity.
++     */
++    fun onWindowChanged(
++        context: Context,
++        configuration: Configuration = context.resources.configuration,
++    ) {
++        update(
++            isTabletScreen = context.isLargeScreenSize(),
++            screenWidthDp = configuration.screenWidthDp,
++            screenHeightDp = configuration.screenHeightDp,
++        )
++    }
++
++    @VisibleForTesting
++    internal fun update(
++        isTabletScreen: Boolean,
++        screenWidthDp: Int,
++        screenHeightDp: Int,
++    ) {
++        val isAllowed = isTabletScreen && screenWidthDp >= MIN_WINDOW_WIDTH_DP
++        if (tabStripAllowedState != isAllowed) {
++            tabStripAllowedState = isAllowed
++        }
++        windowLayoutFlow.value =
++            WindowLayout(
++                isTabStripAllowed = isAllowed,
++                isWideWindow = screenWidthDp > WIDE_SCREEN_WIDTH_DP,
++                isTallWindow = screenHeightDp > TALL_SCREEN_HEIGHT_DP,
++            )
++    }
++}
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
+new file mode 100644
+index 0000000000..63262feabe
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
+@@ -0,0 +1,724 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.browser.tabstrip
++
++import android.graphics.Bitmap
++import androidx.compose.animation.core.Animatable
++import androidx.compose.animation.core.animateDpAsState
++import androidx.compose.animation.core.animateFloatAsState
++import androidx.compose.animation.core.tween
++import androidx.compose.foundation.Image
++import androidx.compose.foundation.background
++import androidx.compose.foundation.clickable
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.BoxWithConstraints
++import androidx.compose.foundation.layout.PaddingValues
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.fillMaxHeight
++import androidx.compose.foundation.layout.fillMaxSize
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.height
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.size
++import androidx.compose.foundation.layout.width
++import androidx.compose.foundation.lazy.LazyRow
++import androidx.compose.foundation.lazy.itemsIndexed
++import androidx.compose.foundation.lazy.rememberLazyListState
++import androidx.compose.foundation.selection.selectableGroup
++import androidx.compose.foundation.shape.CircleShape
++import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.foundation.systemGestureExclusion
++import androidx.compose.material3.CircularProgressIndicator
++import androidx.compose.material3.Icon
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.Text
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.LaunchedEffect
++import androidx.compose.runtime.collectAsState
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableIntStateOf
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.rememberCoroutineScope
++import androidx.compose.runtime.setValue
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.draw.clip
++import androidx.compose.ui.draw.clipToBounds
++import androidx.compose.ui.draw.drawBehind
++import androidx.compose.ui.draw.drawWithContent
++import androidx.compose.ui.geometry.Offset
++import androidx.compose.ui.geometry.Rect
++import androidx.compose.ui.graphics.BlendMode
++import androidx.compose.ui.graphics.Brush
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.graphics.CompositingStrategy
++import androidx.compose.ui.graphics.Path
++import androidx.compose.ui.graphics.asImageBitmap
++import androidx.compose.ui.graphics.drawscope.DrawScope
++import androidx.compose.ui.graphics.graphicsLayer
++import androidx.compose.ui.res.colorResource
++import androidx.compose.ui.res.dimensionResource
++import androidx.compose.ui.res.painterResource
++import androidx.compose.ui.res.stringResource
++import androidx.compose.ui.semantics.CustomAccessibilityAction
++import androidx.compose.ui.semantics.Role
++import androidx.compose.ui.semantics.clearAndSetSemantics
++import androidx.compose.ui.semantics.contentDescription
++import androidx.compose.ui.semantics.customActions
++import androidx.compose.ui.semantics.role
++import androidx.compose.ui.semantics.selected
++import androidx.compose.ui.semantics.semantics
++import androidx.compose.ui.semantics.toggleableState
++import androidx.compose.ui.semantics.traversalIndex
++import androidx.compose.ui.state.ToggleableState
++import androidx.compose.ui.unit.Dp
++import androidx.compose.ui.unit.LayoutDirection
++import androidx.compose.ui.unit.coerceIn
++import androidx.compose.ui.unit.dp
++import androidx.compose.ui.unit.sp
++import androidx.core.text.BidiFormatter
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.flow.distinctUntilChanged
++import kotlinx.coroutines.flow.map
++import kotlinx.coroutines.launch
++import mozilla.components.browser.state.selector.getNormalOrPrivateTabs
++import mozilla.components.browser.state.state.BrowserState
++import mozilla.components.browser.state.store.BrowserStore
++import mozilla.components.compose.base.button.IconButton
++import mozilla.components.compose.base.modifier.thenConditional
++import mozilla.components.concept.engine.utils.ABOUT_HOME_URL
++import mozilla.components.ui.icons.R as iconsR
++import org.mozilla.fenix.R
++import org.mozilla.fenix.compose.Favicon
++import org.mozilla.fenix.compose.ext.isItemPartiallyVisible
++import org.mozilla.fenix.home.ui.getAttr
++import org.mozilla.fenix.tabstray.browser.compose.ReorderableDragItemContainer
++import org.mozilla.fenix.tabstray.browser.compose.createListReorderState
++import org.mozilla.fenix.tabstray.browser.compose.detectListPressAndDrag
++import org.mozilla.fenix.theme.FirefoxTheme
++
++// Geometry and timings modelled on the tab strip of Chrome for Android (StripLayoutHelper / TabUiThemeUtil).
++private val minTabWidth = 108.dp
++private val maxTabWidth = 265.dp
++private val minTabWidthForCloseButton = 156.dp
++private val tabTopMargin = 6.dp
++private val folioCornerRadius = 10.dp
++private val folioFootRadius = 8.dp
++private val stripHorizontalPadding = 8.dp
++private val tabContentStartPadding = 12.dp
++private val tabContentEndPadding = 4.dp
++private val faviconSize = 16.dp
++private val faviconTitleSpacing = 8.dp
++private val closeButtonSize = 28.dp
++private val closeIconSize = 16.dp
++private val dividerHeight = 20.dp
++private val dividerWidth = 1.dp
++private val titleFadeWidth = 16.dp
++private val modeToggleSize = 32.dp
++
++private const val TAB_ANIMATION_MS = 150
++private const val TAB_RESIZE_DELAY_MS = 1500L
++
++/**
++ * Target of the private / normal browsing toggle shown at the end of the tab strip, like Chrome's incognito model
++ * selector. Tapping the toggle selects the most recently used tab of the other browsing mode.
++ *
++ * @property tabId The id of the tab that will be selected.
++ * @property url The url of the tab that will be selected.
++ */
++internal data class TabStripModeToggle(
++    val tabId: String,
++    val url: String,
++)
++
++/**
++ * Returns the [TabStripModeToggle] to show in the tab strip, or null when the other browsing mode has no tabs.
++ *
++ * @param browserStore The [BrowserStore] used to observe the tabs.
++ * @param isPrivateMode Whether the tab strip currently shows private tabs.
++ */
++@Composable
++internal fun rememberTabStripModeToggle(
++    browserStore: BrowserStore,
++    isPrivateMode: Boolean,
++): TabStripModeToggle? {
++    val toggle by
++        remember(browserStore, isPrivateMode) {
++                browserStore.stateFlow.map { it.toTabStripModeToggle(isPrivateMode) }.distinctUntilChanged()
++            }
++            .collectAsState(initial = browserStore.state.toTabStripModeToggle(isPrivateMode))
++    return toggle
++}
++
++internal fun BrowserState.toTabStripModeToggle(isPrivateMode: Boolean): TabStripModeToggle? =
++    getNormalOrPrivateTabs(private = !isPrivateMode)
++        .maxByOrNull { it.lastAccess }
++        ?.let { TabStripModeToggle(tabId = it.id, url = it.content.url) }
++
++/**
++ * Tab strip content laid out and animated like the tab strip of Chrome for Android:
++ * - the selected tab is drawn as a "folio" that merges into the toolbar, unselected tabs are separated by dividers;
++ * - tabs share the available width (between 108dp and 265dp) and the strip scrolls once they reach the minimum width;
++ * - unselected tabs narrower than 156dp hide their close button;
++ * - after closing a tab, the remaining tabs keep their width for a moment so that the next close button ends up under
++ *   the finger, then they resize;
++ * - new tabs slide up into the strip and closed tabs slide down out of it;
++ * - the new tab button follows the last tab and sticks to the end of the strip when tabs overflow;
++ * - a private browsing toggle is shown when the other browsing mode has tabs.
++ *
++ * @param state The [TabStripState] to render.
++ * @param colors The [TabStripColors] to use.
++ * @param modeToggle The private / normal browsing toggle, if it should be shown.
++ * @param showTabCounterButton Whether to show the tab counter button at the end of the strip.
++ * @param onAddTabClick Invoked when the new tab button is clicked.
++ * @param onCloseTabClick Invoked when a tab is closed.
++ * @param onSelectedTabClick Invoked when a tab, or the browsing mode toggle, is clicked.
++ * @param onMove Invoked when a tab is moved by dragging it.
++ * @param onTabCounterClick Invoked when the tab counter is clicked.
++ */
++@Composable
++@Suppress("LongParameterList")
++internal fun ChromeStyleTabStripContent(
++    state: TabStripState,
++    colors: TabStripColors,
++    modeToggle: TabStripModeToggle?,
++    showTabCounterButton: Boolean,
++    onAddTabClick: () -> Unit,
++    onCloseTabClick: (id: String, isPrivate: Boolean) -> Unit,
++    onSelectedTabClick: (tabId: String, url: String) -> Unit,
++    onMove: (tabId: String, targetId: String, placeAfter: Boolean) -> Unit,
++    onTabCounterClick: () -> Unit,
++) {
++    Row(
++        modifier =
++            Modifier.fillMaxWidth()
++                .height(dimensionResource(R.dimen.tab_strip_height))
++                .background(brush = colors.backgroundBrush)
++                .clipToBounds()
++                .systemGestureExclusion(),
++        verticalAlignment = Alignment.CenterVertically,
++    ) {
++        Row(
++            modifier = Modifier.weight(1f).fillMaxHeight(),
++            verticalAlignment = Alignment.CenterVertically,
++        ) {
++            ChromeStyleTabsList(
++                state = state,
++                tabItemBackgroundColors = colors.tabItemBackgroundColors,
++                modifier = Modifier.weight(1f, fill = false).fillMaxHeight(),
++                onCloseTabClick = onCloseTabClick,
++                onSelectedTabClick = onSelectedTabClick,
++                onMove = onMove,
++            )
++
++            IconButton(onClick = onAddTabClick, contentDescription = stringResource(R.string.add_tab)) {
++                Icon(
++                    painter = painterResource(iconsR.drawable.mozac_ic_plus_24),
++                    modifier = Modifier.size(20.dp),
++                    tint = MaterialTheme.colorScheme.onSurface,
++                    contentDescription = null,
++                )
++            }
++        }
++
++        if (modeToggle != null) {
++            PrivateModeToggle(
++                isPrivateMode = state.isPrivateMode,
++                onClick = { onSelectedTabClick(modeToggle.tabId, modeToggle.url) },
++            )
++        }
++
++        if (showTabCounterButton) {
++            TabStripTabCounterButton(
++                tabCount = state.tabs.size,
++                size = dimensionResource(R.dimen.tab_strip_height),
++                menuItems = state.menuItems,
++                privacyBadgeVisible = state.isPrivateMode,
++                onClick = onTabCounterClick,
++            )
++        }
++    }
++}
++
++@Composable
++@Suppress("LongMethod", "CognitiveComplexMethod")
++private fun ChromeStyleTabsList(
++    state: TabStripState,
++    tabItemBackgroundColors: TabStripColors.TabColors,
++    modifier: Modifier = Modifier,
++    onCloseTabClick: (id: String, isPrivate: Boolean) -> Unit,
++    onSelectedTabClick: (tabId: String, url: String) -> Unit,
++    onMove: (tabId: String, targetId: String, placeAfter: Boolean) -> Unit,
++) {
++    BoxWithConstraints(modifier = modifier) {
++        val listState = rememberLazyListState()
++        val availableWidth = maxWidth - stripHorizontalPadding * 2
++        val fittingTabWidth =
++            if (state.tabs.isEmpty()) {
++                maxTabWidth
++            } else {
++                (availableWidth / state.tabs.size).coerceIn(minTabWidth, maxTabWidth)
++            }
++
++        // Like Chrome, keep the tabs width for a moment after a tab is closed from the strip so that the close button
++        // of the next tab ends up under the finger.
++        var frozenTabWidth by remember { mutableStateOf<Dp?>(null) }
++        var closeCount by remember { mutableIntStateOf(0) }
++        LaunchedEffect(closeCount) {
++            if (frozenTabWidth != null) {
++                delay(TAB_RESIZE_DELAY_MS)
++                frozenTabWidth = null
++            }
++        }
++        LaunchedEffect(maxWidth) { frozenTabWidth = null }
++
++        val targetTabWidth = frozenTabWidth?.let { minOf(it, fittingTabWidth) } ?: fittingTabWidth
++        val tabWidth by animateDpAsState(targetValue = targetTabWidth, animationSpec = tween(TAB_ANIMATION_MS))
++
++        val newTabIds = rememberNewTabIds(state.tabs)
++
++        val reorderState =
++            createListReorderState(
++                listState = listState,
++                onMove = { movedTab, adjacentTab ->
++                    onMove(
++                        (movedTab.key as String),
++                        (adjacentTab.key as String),
++                        movedTab.index < adjacentTab.index,
++                    )
++                },
++                ignoredItems = emptyList(),
++            )
++
++        LazyRow(
++            modifier =
++                Modifier.fillMaxHeight()
++                    .detectListPressAndDrag(
++                        reorderState = reorderState,
++                        listState = listState,
++                        shouldLongPressToDrag = true,
++                    )
++                    .selectableGroup(),
++            state = listState,
++            contentPadding = PaddingValues(horizontal = stripHorizontalPadding),
++            verticalAlignment = Alignment.Bottom,
++        ) {
++            itemsIndexed(
++                items = state.tabs,
++                key = { _, item -> item.id },
++            ) { index, itemState ->
++                val nextTab = state.tabs.getOrNull(index + 1)
++                ReorderableDragItemContainer(
++                    state = reorderState,
++                    key = itemState.id,
++                    position = index,
++                ) {
++                    ChromeStyleTabItem(
++                        state = itemState,
++                        width = tabWidth,
++                        showCloseButton = itemState.isSelected || targetTabWidth >= minTabWidthForCloseButton,
++                        showEndDivider = nextTab != null && !itemState.isSelected && !nextTab.isSelected,
++                        isNewTab = itemState.id in newTabIds,
++                        backgroundColors = tabItemBackgroundColors,
++                        onCloseTabClick = { id, isPrivate ->
++                            if (state.tabs.lastOrNull()?.id != id) {
++                                frozenTabWidth = targetTabWidth
++                                closeCount++
++                            }
++                            onCloseTabClick(id, isPrivate)
++                        },
++                        onSelectedTabClick = onSelectedTabClick,
++                        modifier =
++                            Modifier.thenConditional(
++                                modifier = Modifier.semantics { traversalIndex = -1f },
++                                predicate = { itemState.isSelected },
++                            ),
++                    )
++                }
++            }
++        }
++
++        if (state.tabs.isNotEmpty()) {
++            // When a new tab is added, scroll to the end of the list. This acts on state changes so it also works
++            // for tabs opened from any other place, e.g. the tabs tray or a link.
++            LaunchedEffect(state.tabs.last().id) {
++                listState.scrollToItem(state.tabs.lastIndex)
++            }
++
++            // When a tab is selected, scroll to it if it isn't fully visible.
++            val selectedTab = state.tabs.firstOrNull { it.isSelected }
++            LaunchedEffect(selectedTab?.id) {
++                if (selectedTab != null) {
++                    val selectedItemInfo =
++                        listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == selectedTab.id }
++
++                    if (selectedItemInfo == null || listState.isItemPartiallyVisible(selectedItemInfo)) {
++                        listState.animateScrollToItem(state.tabs.indexOf(selectedTab))
++                    }
++                }
++            }
++        }
++    }
++}
++
++/**
++ * Returns the ids of the tabs that have just been added to [tabs], so that they can be animated in. Tabs shown when
++ * the strip is first composed, or after switching between normal and private browsing, are not considered new.
++ */
++@Composable
++private fun rememberNewTabIds(tabs: List<TabStripItem>): Set<String> {
++    val previousIds = remember { arrayOfNulls<Set<String>>(1) }
++    val ids = tabs.mapTo(HashSet()) { it.id }
++    return remember(ids) {
++        val previous = previousIds[0]
++        previousIds[0] = ids
++        if (previous == null || previous.none { it in ids }) {
++            emptySet()
++        } else {
++            ids - previous
++        }
++    }
++}
++
++@Composable
++@Suppress("LongMethod", "LongParameterList", "CognitiveComplexMethod")
++private fun ChromeStyleTabItem(
++    state: TabStripItem,
++    width: Dp,
++    showCloseButton: Boolean,
++    showEndDivider: Boolean,
++    isNewTab: Boolean,
++    backgroundColors: TabStripColors.TabColors,
++    onCloseTabClick: (id: String, isPrivate: Boolean) -> Unit,
++    onSelectedTabClick: (id: String, url: String) -> Unit,
++    modifier: Modifier = Modifier,
++) {
++    val folioColor = backgroundColors.get(isActive = true)
++    val dividerColor = MaterialTheme.colorScheme.outlineVariant
++    val folioAlpha by
++        animateFloatAsState(
++            targetValue = if (state.isSelected) 1f else 0f,
++            animationSpec = tween(TAB_ANIMATION_MS),
++        )
++
++    // 1f means the tab is fully below the strip: new tabs slide up into it, closed tabs slide down out of it.
++    val slideIn = remember { Animatable(if (isNewTab) 1f else 0f) }
++    val slideOut = remember { Animatable(0f) }
++    var isClosing by remember { mutableStateOf(false) }
++    val scope = rememberCoroutineScope()
++    LaunchedEffect(Unit) { slideIn.animateTo(0f, tween(TAB_ANIMATION_MS)) }
++
++    val closeTab: () -> Unit = {
++        if (!isClosing) {
++            isClosing = true
++            scope.launch {
++                try {
++                    slideOut.animateTo(1f, tween(TAB_ANIMATION_MS))
++                } finally {
++                    onCloseTabClick(state.id, state.isPrivate)
++                }
++            }
++        }
++    }
++
++    val closeTabLabel = stringResource(R.string.close_tab)
++
++    Box(
++        modifier =
++            modifier
++                .width(width)
++                .fillMaxHeight()
++                .graphicsLayer {
++                    translationY = maxOf(slideIn.value, slideOut.value) * size.height
++                    alpha = 1f - slideOut.value
++                }
++                .drawBehind {
++                    if (showEndDivider) {
++                        drawEndDivider(color = dividerColor)
++                    }
++                    if (folioAlpha > 0f) {
++                        drawPath(
++                            path =
++                                folioPath(
++                                    top = tabTopMargin.toPx(),
++                                    cornerRadius = folioCornerRadius.toPx(),
++                                    footRadius = folioFootRadius.toPx(),
++                                ),
++                            color = folioColor,
++                            alpha = folioAlpha,
++                        )
++                    }
++                },
++    ) {
++        Row(
++            modifier =
++                Modifier.fillMaxSize()
++                    .padding(top = tabTopMargin)
++                    .clip(RoundedCornerShape(topStart = folioCornerRadius, topEnd = folioCornerRadius))
++                    .clickable { onSelectedTabClick(state.id, state.url) }
++                    .semantics {
++                        role = Role.Tab
++                        selected = state.isSelected
++                        customActions =
++                            listOf(
++                                CustomAccessibilityAction(label = closeTabLabel) {
++                                    closeTab()
++                                    true
++                                },
++                            )
++                    }
++                    .padding(start = tabContentStartPadding, end = tabContentEndPadding),
++            verticalAlignment = Alignment.CenterVertically,
++        ) {
++            TabIcon(
++                url = state.url,
++                icon = state.icon,
++                isLoading = state.isLoading,
++            )
++
++            Spacer(modifier = Modifier.width(faviconTitleSpacing))
++
++            // This makes sure that isRtl is only calculated when the title changes.
++            val isTitleRtl = remember(state.title) { BidiFormatter.getInstance().isRtl(state.title) }
++
++            Box(
++                modifier =
++                    Modifier.weight(1f).fillMaxHeight().fadingEdge(fadeWidth = titleFadeWidth, fadeLeft = isTitleRtl),
++                contentAlignment = Alignment.CenterStart,
++            ) {
++                Text(
++                    text = state.title,
++                    color =
++                        if (state.isSelected) {
++                            MaterialTheme.colorScheme.onSurface
++                        } else {
++                            MaterialTheme.colorScheme.onSurfaceVariant
++                        },
++                    softWrap = false,
++                    maxLines = 1,
++                    style = FirefoxTheme.typography.body2.copy(fontSize = 13.sp),
++                )
++            }
++
++            if (showCloseButton) {
++                val closeButtonDescription = stringResource(id = R.string.close_tab_title, state.title)
++                Box(
++                    modifier =
++                        Modifier.size(closeButtonSize)
++                            .clip(CircleShape)
++                            .clickable(onClick = closeTab)
++                            .then(
++                                if (state.isSelected) {
++                                    Modifier.semantics { contentDescription = closeButtonDescription }
++                                } else {
++                                    Modifier.clearAndSetSemantics {}
++                                },
++                            ),
++                    contentAlignment = Alignment.Center,
++                ) {
++                    Icon(
++                        painter = painterResource(iconsR.drawable.mozac_ic_cross_20),
++                        modifier = Modifier.size(closeIconSize),
++                        tint =
++                            if (state.isSelected) {
++                                MaterialTheme.colorScheme.onSurface
++                            } else {
++                                MaterialTheme.colorScheme.onSurfaceVariant
++                            },
++                        contentDescription = null,
++                    )
++                }
++            } else {
++                Spacer(modifier = Modifier.width(tabContentEndPadding))
++            }
++        }
++    }
++}
++
++/**
++ * Favicon of a tab, replaced by a progress indicator while the page loads (like Chrome's tab strip throbber).
++ */
++@Composable
++private fun TabIcon(
++    url: String,
++    icon: Bitmap?,
++    isLoading: Boolean,
++) {
++    Box(
++        modifier = Modifier.size(faviconSize),
++        contentAlignment = Alignment.Center,
++    ) {
++        when {
++            isLoading ->
++                CircularProgressIndicator(
++                    modifier = Modifier.size(faviconSize),
++                    color = MaterialTheme.colorScheme.primary,
++                    strokeWidth = 2.dp,
++                )
++
++            icon != null && !icon.isRecycled ->
++                Image(
++                    bitmap = icon.asImageBitmap(),
++                    contentDescription = null,
++                    modifier = Modifier.size(faviconSize).clip(RoundedCornerShape(2.dp)),
++                )
++
++            url == ABOUT_HOME_URL ->
++                Favicon(
++                    imageResource = R.drawable.ic_firefox,
++                    size = faviconSize,
++                )
++
++            else ->
++                Favicon(
++                    url = url,
++                    size = faviconSize,
++                )
++        }
++    }
++}
++
++/**
++ * Toggle between normal and private browsing, like Chrome's incognito model selector at the end of its tab strip.
++ */
++@Composable
++private fun PrivateModeToggle(
++    isPrivateMode: Boolean,
++    onClick: () -> Unit,
++) {
++    val contentDescription = stringResource(R.string.content_description_private_browsing)
++    Box(
++        modifier =
++            Modifier.size(48.dp, modeToggleSize)
++                .clickable(onClick = onClick)
++                .semantics {
++                    role = Role.Switch
++                    toggleableState = ToggleableState(isPrivateMode)
++                    this.contentDescription = contentDescription
++                },
++        contentAlignment = Alignment.Center,
++    ) {
++        Box(
++            modifier =
++                Modifier.size(modeToggleSize)
++                    .thenConditional(
++                        modifier =
++                            Modifier.background(
++                                color =
++                                    colorResource(
++                                        getAttr(iconsR.attr.mozac_ic_private_mode_circle_fill_background_color),
++                                    ),
++                                shape = CircleShape,
++                            ),
++                        predicate = { isPrivateMode },
++                    ),
++            contentAlignment = Alignment.Center,
++        ) {
++            Icon(
++                painter = painterResource(iconsR.drawable.mozac_ic_private_mode_24),
++                modifier = Modifier.size(20.dp),
++                tint =
++                    if (isPrivateMode) {
++                        colorResource(getAttr(iconsR.attr.mozac_ic_private_mode_circle_fill_icon_color))
++                    } else {
++                        MaterialTheme.colorScheme.onSurface
++                    },
++                contentDescription = null,
++            )
++        }
++    }
++}
++
++/**
++ * Builds the "folio" shape of the selected tab: rounded top corners and concave feet at the bottom that blend the tab
++ * into the toolbar below it. The feet are drawn outside of the tab bounds.
++ */
++private fun DrawScope.folioPath(
++    top: Float,
++    cornerRadius: Float,
++    footRadius: Float,
++): Path {
++    val width = size.width
++    val height = size.height
++    return Path().apply {
++        moveTo(-footRadius, height)
++        arcTo(
++            rect = Rect(left = -2 * footRadius, top = height - 2 * footRadius, right = 0f, bottom = height),
++            startAngleDegrees = 90f,
++            sweepAngleDegrees = -90f,
++            forceMoveTo = false,
++        )
++        lineTo(0f, top + cornerRadius)
++        arcTo(
++            rect = Rect(left = 0f, top = top, right = 2 * cornerRadius, bottom = top + 2 * cornerRadius),
++            startAngleDegrees = 180f,
++            sweepAngleDegrees = 90f,
++            forceMoveTo = false,
++        )
++        lineTo(width - cornerRadius, top)
++        arcTo(
++            rect = Rect(left = width - 2 * cornerRadius, top = top, right = width, bottom = top + 2 * cornerRadius),
++            startAngleDegrees = 270f,
++            sweepAngleDegrees = 90f,
++            forceMoveTo = false,
++        )
++        lineTo(width, height - footRadius)
++        arcTo(
++            rect = Rect(left = width, top = height - 2 * footRadius, right = width + 2 * footRadius, bottom = height),
++            startAngleDegrees = 180f,
++            sweepAngleDegrees = -90f,
++            forceMoveTo = false,
++        )
++        close()
++    }
++}
++
++/** Draws the vertical divider shown between two unselected tabs, on the end edge of the tab. */
++private fun DrawScope.drawEndDivider(color: Color) {
++    val x =
++        if (layoutDirection == LayoutDirection.Ltr) {
++            size.width - dividerWidth.toPx() / 2
++        } else {
++            dividerWidth.toPx() / 2
++        }
++    val centerY = (size.height + tabTopMargin.toPx()) / 2
++    val halfHeight = dividerHeight.toPx() / 2
++    drawLine(
++        color = color,
++        start = Offset(x, centerY - halfHeight),
++        end = Offset(x, centerY + halfHeight),
++        strokeWidth = dividerWidth.toPx(),
++    )
++}
++
++/**
++ * Fades out the content on its end edge (the left edge when [fadeLeft] is true), whatever the background is.
++ */
++private fun Modifier.fadingEdge(
++    fadeWidth: Dp,
++    fadeLeft: Boolean,
++): Modifier =
++    graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
++        .drawWithContent {
++            drawContent()
++            val fade = fadeWidth.toPx().coerceAtMost(size.width)
++            val brush =
++                if (fadeLeft) {
++                    Brush.horizontalGradient(
++                        colors = listOf(Color.Transparent, Color.Black),
++                        startX = 0f,
++                        endX = fade,
++                    )
++                } else {
++                    Brush.horizontalGradient(
++                        colors = listOf(Color.Black, Color.Transparent),
++                        startX = size.width - fade,
++                        endX = size.width,
++                    )
++                }
++            drawRect(brush = brush, blendMode = BlendMode.DstIn)
++        }
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
+index 8155be98d7..91f7571e04 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
+@@ -182,8 +182,9 @@ fun TabStrip(
+                 animationSpec = tween(durationMillis = TAB_STRIP_VISIBILITY_ANIMATION_MS),
+             ),
+     ) {
+-        TabStripContent(
++        ChromeStyleTabStripContent(
+             state = state,
++            modeToggle = rememberTabStripModeToggle(browserStore, state.isPrivateMode),
+             showTabCounterButton = showTabCounterButton,
+             colors = tabStripColors,
+             onAddTabClick = createAddTabClickHandler(onAddTabClick),
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripState.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripState.kt
+index b57f3a1f22..c92339911e 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripState.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripState.kt
+@@ -48,6 +48,7 @@ data class TabStripState(
+  * @property isPrivate Whether or not the tab is private.
+  * @property isSelected Whether or not the tab is selected.
+  * @property isCloseButtonVisible Whether or not the close button is visible.
++ * @property isLoading Whether or not the tab is loading a page.
+  */
+ data class TabStripItem(
+     val id: String,
+@@ -57,6 +58,7 @@ data class TabStripItem(
+     val isPrivate: Boolean,
+     val isSelected: Boolean,
+     val isCloseButtonVisible: Boolean = true,
++    val isLoading: Boolean = false,
+ )
+ 
+ /**
+@@ -136,5 +138,6 @@ private fun TabSessionState.toTabStripItem(
+         isPrivate = content.private,
+         isSelected = isSelected,
+         isCloseButtonVisible = showCloseButtonOnUnselectedTabs || isSelected,
++        isLoading = content.loading,
+     )
+ }
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserNavigationBar.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserNavigationBar.kt
+index 10396db381..349f598ac1 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserNavigationBar.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserNavigationBar.kt
+@@ -28,6 +28,7 @@ import mozilla.components.compose.browser.toolbar.store.ToolbarGravity.Top
+ import mozilla.components.support.utils.KeyboardState
+ import mozilla.components.support.utils.keyboardAsState
+ import org.mozilla.fenix.R
++import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
+ import org.mozilla.fenix.theme.FirefoxTheme
+ import org.mozilla.fenix.utils.Settings
+ 
+@@ -58,13 +59,15 @@ class BrowserNavigationBar(
+ ) {
+     val layout =
+         NavigationBarComposeView(context) {
+-                val shouldShowTabStrip = remember {
++                // Recompose when the window changes (e.g. a foldable is folded / unfolded) to show / hide the tab strip.
++                val isTabStripAllowed = AdaptiveTabStrip.isTabStripAllowed
++                val shouldShowTabStrip = remember(isTabStripAllowed) {
+                     customTabSessionId == null && settings.shouldShowTabStripAtBottom
+                 }
+-                val shouldShowTabGroupsStrip = remember {
++                val shouldShowTabGroupsStrip = remember(isTabStripAllowed) {
+                     customTabSessionId == null && settings.shouldShowTabGroupsStrip
+                 }
+-                val hasBottomStrips = remember { hasBottomStrip() }
++                val hasBottomStrips = remember(isTabStripAllowed) { hasBottomStrip() }
+ 
+                 FirefoxTheme {
+                     TopDividerColumn(
+@@ -115,7 +118,7 @@ class BrowserNavigationBar(
+                     false -> Top
+                 }
+             }
+-        val hasBottomStrip = remember { hasBottomStrip() }
++        val hasBottomStrip = remember(AdaptiveTabStrip.isTabStripAllowed) { hasBottomStrip() }
+         val isKeyboardVisible =
+             if (hideWhenKeyboardShown) {
+                 val keyboardState by keyboardAsState()
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
+index 3f14f1e68c..3295df206f 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
+@@ -9,6 +9,7 @@ import android.view.View
+ import android.view.ViewGroup
+ import androidx.annotation.VisibleForTesting
+ import androidx.appcompat.app.AppCompatActivity
++import androidx.compose.animation.AnimatedVisibility
+ import androidx.compose.foundation.background
+ import androidx.compose.foundation.layout.Box
+ import androidx.compose.foundation.layout.Column
+@@ -50,6 +51,7 @@ import mozilla.components.ui.widgets.behavior.DependencyGravity
+ import mozilla.components.ui.widgets.behavior.EngineViewScrollingBehavior
+ import mozilla.components.ui.widgets.behavior.EngineViewScrollingBehaviorFactory
+ import org.mozilla.fenix.browser.store.BrowserScreenStore
++import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
+ import org.mozilla.fenix.components.AppStore
+ import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchEnded
+ import org.mozilla.fenix.components.toolbar.ToolbarPosition.BOTTOM
+@@ -102,16 +104,18 @@ class BrowserToolbarComposable(
+     val layout: View =
+         ScrollableToolbarComposeView(activity, this) {
+                 val isSearching = toolbarStore.observeAsComposableState { it.isEditMode() }.value
+-                val shouldShowTabStripAtTop = remember {
++                // Recompose when the window changes (e.g. a foldable is folded / unfolded) to show / hide the tab strip.
++                val isTabStripAllowed = AdaptiveTabStrip.isTabStripAllowed
++                val shouldShowTabStripAtTop = remember(isTabStripAllowed) {
+                     customTabSession == null && settings.shouldShowTabStripAtTop
+                 }
+-                val shouldShowTabStripAtBottom = remember {
++                val shouldShowTabStripAtBottom = remember(isTabStripAllowed) {
+                     customTabSession == null && settings.shouldShowTabStripAtBottom
+                 }
+-                val shouldShowTabGroupsStrip: Boolean = remember {
++                val shouldShowTabGroupsStrip: Boolean = remember(isTabStripAllowed) {
+                     customTabSession == null && settings.shouldShowTabGroupsStrip
+                 }
+-                val hasBottomStrip = remember {
++                val hasBottomStrip = remember(isTabStripAllowed) {
+                     customTabSession == null &&
+                         (settings.shouldShowTabStripAtBottom || settings.shouldShowTabGroupsStrip)
+                 }
+@@ -165,7 +169,7 @@ class BrowserToolbarComposable(
+                         when (!shouldUseBottomToolbar) {
+                             true ->
+                                 Column(modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
+-                                    if (shouldShowTabStripAtTop) {
++                                    AnimatedVisibility(visible = shouldShowTabStripAtTop) {
+                                         tabStripContent()
+                                     }
+                                     BrowserToolbar(
+@@ -185,7 +189,7 @@ class BrowserToolbarComposable(
+                                         searchSuggestionsContent(Modifier.weight(1f))
+                                     }
+                                     TopDividerColumn(showDivider = hasBottomStrip, modifier = Modifier.fillMaxWidth()) {
+-                                        if (shouldShowTabStripAtBottom) {
++                                        AnimatedVisibility(visible = shouldShowTabStripAtBottom) {
+                                             Box(modifier = Modifier.background(MaterialTheme.colorScheme.surface)) {
+                                                 tabStripContent()
+                                             }
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarMiddleware.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarMiddleware.kt
+index 7500c18a76..21e4dd9570 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarMiddleware.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarMiddleware.kt
+@@ -14,6 +14,8 @@ import kotlinx.coroutines.CoroutineScope
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.Job
+ import kotlinx.coroutines.flow.Flow
++import kotlinx.coroutines.flow.combine
++import kotlinx.coroutines.flow.distinctUntilChanged
+ import kotlinx.coroutines.flow.distinctUntilChangedBy
+ import kotlinx.coroutines.flow.first
+ import kotlinx.coroutines.launch
+@@ -103,6 +105,7 @@ import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
+ import org.mozilla.fenix.browser.readermode.ReaderModeController
+ import org.mozilla.fenix.browser.store.BrowserScreenAction
+ import org.mozilla.fenix.browser.store.BrowserScreenStore
++import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
+ import org.mozilla.fenix.components.AppStore
+ import org.mozilla.fenix.components.NimbusComponents
+ import org.mozilla.fenix.components.UseCases
+@@ -962,7 +965,10 @@ class BrowserToolbarMiddleware(
+ 
+     private fun observeOrientationChanges(store: Store<BrowserToolbarState, BrowserToolbarAction>) {
+         appStore.observeWhileActive {
+-            distinctUntilChangedBy { it.orientation }
++            // Also rebuild the toolbar when the window changes without an orientation change, e.g. when a foldable
++            // is folded / unfolded, so that it shows the actions fitting the new window and tab strip visibility.
++            combine(AdaptiveTabStrip.windowLayout) { state, windowLayout -> state.orientation to windowLayout }
++                .distinctUntilChanged()
+                 .collect {
+                     updateStartBrowserActions(store)
+                     updateEndBrowserActions(store)
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/BrowserToolbarMiddleware.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/BrowserToolbarMiddleware.kt
+index 9c8c89423b..95b974237f 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/BrowserToolbarMiddleware.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/BrowserToolbarMiddleware.kt
+@@ -15,6 +15,8 @@ import kotlinx.coroutines.CoroutineScope
+ import kotlinx.coroutines.Job
+ import kotlinx.coroutines.delay
+ import kotlinx.coroutines.flow.Flow
++import kotlinx.coroutines.flow.combine
++import kotlinx.coroutines.flow.distinctUntilChanged
+ import kotlinx.coroutines.flow.distinctUntilChangedBy
+ import kotlinx.coroutines.flow.first
+ import kotlinx.coroutines.launch
+@@ -70,6 +72,7 @@ import org.mozilla.fenix.browser.browsingmode.BrowsingMode
+ import org.mozilla.fenix.browser.browsingmode.BrowsingMode.Normal
+ import org.mozilla.fenix.browser.browsingmode.BrowsingMode.Private
+ import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
++import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
+ import org.mozilla.fenix.components.AppStore
+ import org.mozilla.fenix.components.appstate.AppAction
+ import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchStarted
+@@ -537,7 +540,10 @@ class BrowserToolbarMiddleware(
+ 
+     private fun updateToolbarActionsBasedOnOrientation(store: Store<BrowserToolbarState, BrowserToolbarAction>) {
+         appStore.observeWhileActive {
+-            distinctUntilChangedBy { it.orientation }
++            // Also rebuild the toolbar when the window changes without an orientation change, e.g. when a foldable
++            // is folded / unfolded, so that it shows the actions fitting the new window and tab strip visibility.
++            combine(AdaptiveTabStrip.windowLayout) { state, windowLayout -> state.orientation to windowLayout }
++                .distinctUntilChanged()
+                 .collect {
+                     updateStartBrowserActions(store)
+                     updateEndBrowserActions(store)
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeNavigationBar.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeNavigationBar.kt
+index 0b340f4634..778cd501a8 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeNavigationBar.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeNavigationBar.kt
+@@ -17,6 +17,7 @@ import mozilla.components.compose.browser.toolbar.store.ToolbarGravity.Top
+ import mozilla.components.support.utils.KeyboardState
+ import mozilla.components.support.utils.keyboardAsState
+ import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
++import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
+ import org.mozilla.fenix.components.AppStore
+ import org.mozilla.fenix.theme.FirefoxTheme
+ import org.mozilla.fenix.utils.Settings
+@@ -50,7 +51,9 @@ class HomeNavigationBar(
+                     false -> Top
+                 }
+             }
+-        val hasBottomStrip = remember { settings.shouldShowTabStripAtBottom || settings.shouldShowTabGroupsStrip }
++        val hasBottomStrip = remember(AdaptiveTabStrip.isTabStripAllowed) {
++            settings.shouldShowTabStripAtBottom || settings.shouldShowTabGroupsStrip
++        }
+         val isKeyboardVisible =
+             if (hideWhenKeyboardShown) {
+                 val keyboardState by keyboardAsState()
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
+index fe54f0c099..ed39c0a67b 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
+@@ -46,6 +46,7 @@ import mozilla.components.compose.browser.toolbar.ui.BrowserToolbarQuery
+ import mozilla.components.lib.state.ext.observeAsComposableState
+ import org.mozilla.fenix.R
+ import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
++import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
+ import org.mozilla.fenix.components.AppStore
+ import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchEnded
+ import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchStarted
+@@ -150,14 +151,18 @@ internal class HomeToolbarComposable(
+     @Composable
+     private fun ToolbarContent(wallpaperTextColor: Color?) {
+         val shouldUseBottomToolbar = remember { settings.shouldUseBottomToolbar }
+-        val shouldShowTabStrip = remember {
++        // Recompose when the window changes (e.g. a foldable is folded / unfolded) to show / hide the tab strip.
++        val isTabStripAllowed = AdaptiveTabStrip.isTabStripAllowed
++        val shouldShowTabStrip = remember(isTabStripAllowed) {
+             if (shouldUseBottomToolbar) {
+                 settings.shouldShowTabStripAtBottom
+             } else {
+                 settings.shouldShowTabStripAtTop
+             }
+         }
+-        val isTabStripAtBottom = remember { shouldUseBottomToolbar && settings.shouldShowTabStripAtBottom }
++        val isTabStripAtBottom = remember(isTabStripAllowed) {
++            shouldUseBottomToolbar && settings.shouldShowTabStripAtBottom
++        }
+ 
+         Column(
+             modifier =
+@@ -171,7 +176,7 @@ internal class HomeToolbarComposable(
+             }
+ 
+             TopDividerColumn(showDivider = isTabStripAtBottom, modifier = Modifier.fillMaxWidth()) {
+-                if (shouldShowTabStrip) {
++                AnimatedVisibility(visible = shouldShowTabStrip) {
+                     tabStripContent()
+                 }
+ 
+@@ -191,7 +196,7 @@ internal class HomeToolbarComposable(
+     @Composable
+     private fun ColumnScope.AddressBar(wallpaperTextColor: Color?) {
+         val isAddressBarVisible = remember { addressBarVisibility }
+-        val hasBottomStrip = remember {
++        val hasBottomStrip = remember(AdaptiveTabStrip.isTabStripAllowed) {
+             settings.shouldUseBottomToolbar &&
+                 (settings.shouldShowTabStripAtBottom || settings.shouldShowTabGroupsStrip)
+         }
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
+index 1956c4ef6f..9a2976c791 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
+@@ -304,11 +304,11 @@ class CustomizationFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFrag
+         val tabStripSwitch = requirePreference<SwitchPreferenceCompat>(R.string.pref_key_tab_strip_show)
+         val context = requireContext()
+ 
+-        tabStripSwitch.isChecked = Settings(requireContext()).isTabStripEnabled
++        tabStripSwitch.isChecked = Settings(requireContext()).isTabStripPreferenceEnabled
+ 
+         tabStripSwitch.setOnPreferenceChangeListener { _, newValue ->
+             val enabled = newValue as Boolean
+-            context.components.settings.isTabStripEnabled = enabled
++            context.components.settings.isTabStripPreferenceEnabled = enabled
+             setupToolbarLayout()
+             setupTabStripLocationCategory()
+             updateToolbarShortcut()
+@@ -318,7 +318,7 @@ class CustomizationFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFrag
+ 
+     private fun setupTabStripLocationCategory() {
+         val settings = requireComponents.settings
+-        val isTabStripEnabled = settings.isTabStripEnabled
++        val isTabStripEnabled = settings.isTabStripPreferenceEnabled
+ 
+         requirePreference<PreferenceCategory>(R.string.pref_key_tab_strip_location).isVisible = isTabStripEnabled
+         if (!isTabStripEnabled) return
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt
+index dbcf87fe9d..c21c151a16 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt
+@@ -71,8 +71,11 @@ class StatusBarColorManager(
+ 
+         when {
+             // Don't show the status bar gradient if tab strip is not enabled, shown at the bottom
+-            // or private mode is enabled.
+-            !settings.isTabStripEnabled || settings.shouldUseBottomTabStrip || themeManager.currentTheme.isPrivate -> {
++            // or private mode is enabled. Whether the window is currently large enough for the tab strip
++            // is handled by [TabStripStatusBarView] itself, so that it follows folding / unfolding.
++            !settings.isTabStripPreferenceEnabled ||
++                settings.shouldUseBottomTabStrip ||
++                themeManager.currentTheme.isPrivate -> {
+                 tabStripStatusBarView.hide()
+             }
+ 
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/TabStripStatusBarView.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/TabStripStatusBarView.kt
+index 22f6ecba25..cb2a565289 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/TabStripStatusBarView.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/TabStripStatusBarView.kt
+@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.ComposeView
+ import androidx.compose.ui.platform.ViewCompositionStrategy
+ import androidx.compose.ui.platform.createLifecycleAwareWindowRecomposer
+ import androidx.lifecycle.Lifecycle
++import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
+ 
+ /**
+  * View class that sets the status bar background with the tab strip gradient by overlaying a [ComposeView] on the given
+@@ -45,13 +46,16 @@ class TabStripStatusBarView(
+                 setParentCompositionContext(createLifecycleAwareWindowRecomposer(lifecycle = lifecycle))
+                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+                 setContent {
+-                    FirefoxTheme {
+-                        Box(
+-                            modifier =
+-                                Modifier.fillMaxWidth()
+-                                    .windowInsetsTopHeight(WindowInsets.statusBars)
+-                                    .background(brush = FirefoxTheme.gradients.accentSubtle.brush)
+-                        )
++                    // Only draw the gradient while the window is large enough for the tab strip.
++                    if (AdaptiveTabStrip.isTabStripAllowed) {
++                        FirefoxTheme {
++                            Box(
++                                modifier =
++                                    Modifier.fillMaxWidth()
++                                        .windowInsetsTopHeight(WindowInsets.statusBars)
++                                        .background(brush = FirefoxTheme.gradients.accentSubtle.brush)
++                            )
++                        }
+                     }
+                 }
+             }
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
+index 14b8faaa9d..005694bd4e 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
+@@ -30,7 +30,6 @@ import mozilla.components.lib.crash.store.CrashReportOption
+ import mozilla.components.support.base.log.logger.Logger
+ import mozilla.components.support.ktx.android.content.PreferencesHolder
+ import mozilla.components.support.ktx.android.content.booleanPreference
+-import mozilla.components.support.ktx.android.content.doesDeviceHaveHinge
+ import mozilla.components.support.ktx.android.content.floatPreference
+ import mozilla.components.support.ktx.android.content.intPreference
+ import mozilla.components.support.ktx.android.content.longPreference
+@@ -49,6 +48,7 @@ import org.mozilla.fenix.GleanMetrics.TopSites
+ import org.mozilla.fenix.R
+ import org.mozilla.fenix.autofill.address.RegionAddressFeatureGate
+ import org.mozilla.fenix.browser.browsingmode.BrowsingMode
++import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
+ import org.mozilla.fenix.components.lens.CameraMode
+ import org.mozilla.fenix.components.settings.counterPreference
+ import org.mozilla.fenix.components.settings.featureFlagBooleanPreference
+@@ -2265,14 +2265,29 @@ class Settings(
+             default = { FxNimbus.features.searchOptimizationOption.value().showSportsCard },
+         )
+ 
+-    var isTabStripEnabled by
++    /**
++     * Whether the user wants the tab strip. Like in Chrome, the tab strip is then shown automatically whenever the
++     * app window is large enough for it (see [AdaptiveTabStrip]), e.g. as soon as a foldable is unfolded.
++     */
++    var isTabStripPreferenceEnabled by
+         booleanPreference(
+             appContext.getPreferenceKey(R.string.pref_key_tab_strip_show),
+-            default =
+-                FxNimbus.features.tabStrip.value().enabled &&
+-                    (isTabStripEligible(appContext) || FxNimbus.features.tabStrip.value().allowOnAllDevices),
++            default = FxNimbus.features.tabStrip.value().enabled,
+         )
+ 
++    /**
++     * Whether the tab strip is currently shown: the user preference combined with the current window size. Reading
++     * this from a composable recomposes it when the window changes (e.g. when a foldable is folded or unfolded).
++     * Setting it updates the user preference.
++     */
++    var isTabStripEnabled: Boolean
++        get() =
++            isTabStripPreferenceEnabled &&
++                (AdaptiveTabStrip.isTabStripAllowed || FxNimbus.features.tabStrip.value().allowOnAllDevices)
++        set(value) {
++            isTabStripPreferenceEnabled = value
++        }
++
+     var isDynamicToolbarEnabled by
+         booleanPreference(
+             appContext.getPreferenceKey(R.string.pref_key_dynamic_toolbar),
+@@ -2313,16 +2328,6 @@ class Settings(
+             featureFlag = isAddressFeatureEnabled(appContext),
+         )
+ 
+-    /** Returns true if the the device has the prerequisites to enable the tab strip. */
+-    private fun isTabStripEligible(context: Context): Boolean {
+-        // Tab Strip is currently disabled on foldable devices, while we work on improving the
+-        // Homescreen / Toolbar / Browser screen to better support the feature. There is also
+-        // an emulator bug that causes the doesDeviceHaveHinge check to return true on emulators,
+-        // causing it to be disabled on emulator tablets for API 34 and below.
+-        // https://issuetracker.google.com/issues/296162661
+-        return context.isLargeScreenSize() && !context.doesDeviceHaveHinge()
+-    }
+-
+     /** Show the Addresses autofill feature. */
+     private fun isAddressFeatureEnabled(context: Context): Boolean {
+         val locale = LocaleManager.getCurrentLocale(context) ?: LocaleManager.getSystemDefault()
+diff --git a/mobile/android/fenix/app/src/main/res/values/dimens.xml b/mobile/android/fenix/app/src/main/res/values/dimens.xml
+index 0d898d8c48..69565fee62 100644
+--- a/mobile/android/fenix/app/src/main/res/values/dimens.xml
++++ b/mobile/android/fenix/app/src/main/res/values/dimens.xml
+@@ -66,7 +66,7 @@
+     <dimen name="browser_toolbar_height">56dp</dimen>
+     <dimen name="browser_navbar_height">60dp</dimen>
+     <dimen name="browser_navbar_height_small">48dp</dimen>
+-    <dimen name="tab_strip_height">56dp</dimen>
++    <dimen name="tab_strip_height">40dp</dimen>
+     <dimen name="browser_microsurvey_height">131dp</dimen>
+     <dimen name="tab_groups_strip_height">48dp</dimen>
+ 
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt
+new file mode 100644
+index 0000000000..34465b7470
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt
+@@ -0,0 +1,91 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.browser.tabstrip
++
++import mozilla.components.support.test.robolectric.testContext
++import org.junit.After
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.mozilla.fenix.utils.Settings
++import org.robolectric.RobolectricTestRunner
++
++@RunWith(RobolectricTestRunner::class)
++class AdaptiveTabStripTest {
++
++    @After
++    fun tearDown() {
++        // Restore the default state shared by all the tests.
++        AdaptiveTabStrip.update(isTabletScreen = true, screenWidthDp = 1000, screenHeightDp = 800)
++    }
++
++    @Test
++    fun `GIVEN an unfolded foldable WHEN the window is updated THEN the tab strip is allowed`() {
++        // Inner screen of a Galaxy Z Fold.
++        AdaptiveTabStrip.update(isTabletScreen = true, screenWidthDp = 690, screenHeightDp = 829)
++
++        assertTrue(AdaptiveTabStrip.isTabStripAllowed)
++        assertEquals(
++            AdaptiveTabStrip.WindowLayout(isTabStripAllowed = true, isWideWindow = true, isTallWindow = true),
++            AdaptiveTabStrip.windowLayout.value,
++        )
++    }
++
++    @Test
++    fun `GIVEN a folded foldable WHEN the window is updated THEN the tab strip is not allowed`() {
++        // Cover screen of a Galaxy Z Fold, in portrait and in landscape.
++        AdaptiveTabStrip.update(isTabletScreen = false, screenWidthDp = 411, screenHeightDp = 960)
++        assertFalse(AdaptiveTabStrip.isTabStripAllowed)
++
++        AdaptiveTabStrip.update(isTabletScreen = false, screenWidthDp = 960, screenHeightDp = 411)
++        assertFalse(AdaptiveTabStrip.isTabStripAllowed)
++        assertEquals(
++            AdaptiveTabStrip.WindowLayout(isTabStripAllowed = false, isWideWindow = true, isTallWindow = false),
++            AdaptiveTabStrip.windowLayout.value,
++        )
++    }
++
++    @Test
++    fun `GIVEN a tablet screen WHEN the window is narrower than the minimum width THEN the tab strip is not allowed`() {
++        AdaptiveTabStrip.update(isTabletScreen = true, screenWidthDp = 411, screenHeightDp = 800)
++        assertFalse(AdaptiveTabStrip.isTabStripAllowed)
++
++        AdaptiveTabStrip.update(
++            isTabletScreen = true,
++            screenWidthDp = AdaptiveTabStrip.MIN_WINDOW_WIDTH_DP,
++            screenHeightDp = 800,
++        )
++        assertTrue(AdaptiveTabStrip.isTabStripAllowed)
++    }
++
++    @Test
++    fun `GIVEN the tab strip preference is enabled WHEN the window changes THEN the tab strip follows the window`() {
++        val settings = Settings(testContext)
++        settings.isTabStripPreferenceEnabled = true
++        settings.shouldUseBottomTabStrip = false
++
++        AdaptiveTabStrip.update(isTabletScreen = true, screenWidthDp = 690, screenHeightDp = 829)
++        assertTrue(settings.isTabStripEnabled)
++        assertTrue(settings.shouldShowTabStripAtTop)
++
++        AdaptiveTabStrip.update(isTabletScreen = false, screenWidthDp = 411, screenHeightDp = 960)
++        assertFalse(settings.isTabStripEnabled)
++        assertFalse(settings.shouldShowTabStripAtTop)
++        assertTrue(settings.isTabStripPreferenceEnabled)
++    }
++
++    @Test
++    fun `GIVEN the tab strip preference is disabled WHEN the window is large THEN the tab strip is not shown`() {
++        val settings = Settings(testContext)
++        settings.isTabStripEnabled = false
++
++        AdaptiveTabStrip.update(isTabletScreen = true, screenWidthDp = 1000, screenHeightDp = 800)
++
++        assertFalse(settings.isTabStripPreferenceEnabled)
++        assertFalse(settings.isTabStripEnabled)
++    }
++}
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt
+index 4f2b7c1f10..905ef44472 100644
+--- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt
+@@ -208,7 +208,7 @@ class StatusBarColorManagerTest {
+         isTabStripEnabled: Boolean,
+         appStore: AppStore = AppStore(),
+     ): StatusBarColorManager {
+-        every { settings.isTabStripEnabled } returns isTabStripEnabled
++        every { settings.isTabStripPreferenceEnabled } returns isTabStripEnabled
+ 
+         return StatusBarColorManager(
+             themeManager = themeManager,
