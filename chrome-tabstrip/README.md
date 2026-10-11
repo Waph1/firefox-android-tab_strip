@@ -3,6 +3,7 @@
 Questa cartella contiene una **patch** per il sorgente ufficiale di Firefox per Android (Fenix) che rende la
 barra delle schede (tab strip) uguale, nel comportamento, a quella di **Chrome per Android**, e la fa
 **comparire e sparire in tempo reale** quando si apre o si chiude un pieghevole come il **Samsung Galaxy Z Fold**.
+Allo stesso modo i siti passano **al volo** dalla versione desktop (telefono aperto) a quella mobile (telefono chiuso).
 
 La patch è pensata per essere **riapplicata a ogni aggiornamento di Firefox**: quasi tutto il codice sta in file
 nuovi e le modifiche ai file esistenti sono poche righe, così i conflitti con le nuove versioni di Firefox sono rari
@@ -66,6 +67,31 @@ Quando si apre o si chiude il telefono:
 
 Upstream, invece, Firefox **disabilita** la tab strip sui pieghevoli (controllo della cerniera in
 `Settings.isTabStripEligible`) e decide una sola volta all'avvio.
+
+### Siti in versione desktop o mobile, seguendo lo schermo
+
+Come per la tab strip, con le impostazioni predefinite Firefox mostra i siti nella **versione desktop** sugli schermi
+grandi e nella **versione mobile** su quelli piccoli, e passa dall'una all'altra **al volo** quando si apre o si
+chiude il telefono:
+
+| Situazione                                                              | Siti                |
+|-------------------------------------------------------------------------|---------------------|
+| Z Fold **aperto**, tablet (gli stessi casi in cui compare la tab strip) | 🖥️ versione desktop |
+| Z Fold **chiuso**, telefono, finestra divisa / pop-up stretta           | 📱 versione mobile  |
+
+- La scheda che stai guardando si **ricarica subito** nella nuova versione (passando, ad es., da `m.sito.com` a
+  `sito.com` quando torna desktop); le altre schede si ricaricano quando le selezioni, così aprire o chiudere il
+  telefono non ricarica decine di pagine tutte insieme.
+- **Impostazioni → Impostazioni dei siti web → Richiedi sempre sito desktop** viene ricordata **separatamente per lo
+  schermo grande e per quello piccolo**: l'interruttore mostra e modifica il valore dello schermo che stai usando. Per
+  avere i siti desktop anche a telefono chiuso, ad esempio, basta attivarlo dallo schermo esterno. Predefinito: attivo
+  sullo schermo grande, disattivo su quello piccolo (come upstream). Cambiarlo aggiorna anche le schede già aperte.
+- Se per una scheda scegli dal menu **Sito desktop** la versione opposta a quella predefinita, quella scheda la
+  **mantiene** anche aprendo e chiudendo il telefono (e dopo un riavvio di Firefox); se dal menu rimetti la versione
+  predefinita, la scheda torna a seguire lo schermo.
+
+Upstream, invece, Firefox sceglie la versione predefinita una sola volta, in base allo schermo su cui si avvia, e le
+schede aperte restano nella versione con cui sono state aperte.
 
 ### Aspetto e comportamento delle schede, come in Chrome
 
@@ -170,7 +196,8 @@ Per eseguire i test unitari della patch (dopo `build.sh`):
 ```bash
 cd ~/firefox
 MOZCONFIG=$PWD/mozconfig-chrome-tabstrip ./mach gradle fenix:testDebugUnitTest \
-    --tests 'org.mozilla.fenix.browser.tabstrip.*' --tests 'org.mozilla.fenix.theme.StatusBarColorManagerTest'
+    --tests 'org.mozilla.fenix.browser.tabstrip.*' --tests 'org.mozilla.fenix.browser.desktopmode.*' \
+    --tests 'org.mozilla.fenix.theme.StatusBarColorManagerTest'
 ```
 
 ## Automazione con GitHub Actions
@@ -192,10 +219,16 @@ modifiche al repository: in quel caso ti manda un'e-mail e basta riattivarle da 
 File nuovi (`mobile/android/fenix/app/src/...`):
 
 - `browser/tabstrip/AdaptiveTabStrip.kt` — decide, come Chrome, se la finestra attuale è abbastanza grande per la
-  tab strip; è uno stato Compose aggiornato da `HomeActivity` a ogni cambio di configurazione (piega/apertura,
-  rotazione, multi-finestra), così l'interfaccia si ricompone da sola.
+  tab strip (e per i siti desktop); è uno stato Compose aggiornato da `HomeActivity` a ogni cambio di configurazione
+  (piega/apertura, rotazione, multi-finestra), così l'interfaccia si ricompone da sola.
 - `browser/tabstrip/ChromeStyleTabStrip.kt` — la nuova tab strip in stile Chrome.
-- `test/.../browser/tabstrip/AdaptiveTabStripTest.kt`, `TabStripModeToggleTest.kt` — test unitari.
+- `browser/desktopmode/AdaptiveDesktopModeMiddleware.kt` — fa sì che la versione desktop/mobile dei siti segua la
+  finestra (al posto di `DesktopModeMiddleware`) e aggiorna le schede aperte quando cambia;
+  `AdaptiveDesktopModeRepository.kt` salva la preferenza per schermo grande e piccolo e le schede con una versione
+  scelta dal menu.
+- `test/.../browser/tabstrip/AdaptiveTabStripTest.kt`, `TabStripModeToggleTest.kt`,
+  `test/.../browser/desktopmode/AdaptiveDesktopModeMiddlewareTest.kt`, `AdaptiveDesktopModeRepositoryTest.kt` — test
+  unitari.
 
 Modifiche piccole ai file esistenti:
 
@@ -208,6 +241,8 @@ Modifiche piccole ai file esistenti:
 - `components/toolbar/BrowserToolbarMiddleware.kt`, `home/toolbar/BrowserToolbarMiddleware.kt` — ricostruiscono i
   pulsanti della toolbar anche quando la finestra cambia senza ruotare (tipico del Fold).
 - `StatusBarColorManager.kt`, `TabStripStatusBarView.kt` — il gradiente della status bar segue la strip.
+- `components/Core.kt` — usa `AdaptiveDesktopModeMiddleware`; `SiteSettingsFragment.kt` — l'interruttore «Richiedi
+  sempre sito desktop» si aggiorna se si apre/chiude il telefono con la schermata aperta.
 - `CustomizationFragment.kt` — l'interruttore nelle impostazioni usa la preferenza utente.
 - `TabStrip.kt` (usa `ChromeStyleTabStripContent`), `TabStripState.kt` (stato di caricamento), `dimens.xml`
   (altezza 40dp), `StatusBarColorManagerTest.kt` (adeguato alle modifiche).
