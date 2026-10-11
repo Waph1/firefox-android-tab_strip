@@ -1235,7 +1235,7 @@ index 00000000000..63262feabe8
 +        }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ImmersiveTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ImmersiveTabStrip.kt
 new file mode 100644
-index 00000000000..7017ae71341
+index 00000000000..706a42c2f32
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ImmersiveTabStrip.kt
 @@ -0,0 +1,200 @@
@@ -1270,9 +1270,9 @@ index 00000000000..7017ae71341
 + * foldable is folded and the app moves to the cover screen).
 + *
 + * While hidden, the status bar can still be revealed for a moment by swiping down from the top edge of the screen. It
-+ * is then laid over the tabs: the app content is given window insets in which the status bar and the top display
-+ * cutout take no space (see [transformInsets]), so that the UI never moves when the status bar is revealed, nor when a
-+ * window that does not hide it (e.g. a popup) brings it back. Dialogs hide it as well while they are shown.
++ * is then laid over the tabs: the app content is given window insets in which the status bar and the top display cutout
++ * take no space (see [transformInsets]), so that the UI never moves when the status bar is revealed, nor when a window
++ * that does not hide it (e.g. a popup) brings it back. Dialogs hide it as well while they are shown.
 + *
 + * Only on Android 13+, where Fenix is shown edge-to-edge, and never in multi-window mode, where the system keeps the
 + * status bar visible.
