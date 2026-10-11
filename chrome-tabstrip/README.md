@@ -3,7 +3,8 @@
 Questa cartella contiene una **patch** per il sorgente ufficiale di Firefox per Android (Fenix) che rende la
 barra delle schede (tab strip) uguale, nel comportamento, a quella di **Chrome per Android**, e la fa
 **comparire e sparire in tempo reale** quando si apre o si chiude un pieghevole come il **Samsung Galaxy Z Fold**.
-Allo stesso modo i siti passano **al volo** dalla versione desktop (telefono aperto) a quella mobile (telefono chiuso).
+Allo stesso modo i siti passano **al volo** dalla versione desktop (telefono aperto) a quella mobile (telefono chiuso)
+e la status bar sparisce a telefono aperto, con le schede a filo del bordo superiore, per tornare a telefono chiuso.
 
 La patch è pensata per essere **riapplicata a ogni aggiornamento di Firefox**: quasi tutto il codice sta in file
 nuovi e le modifiche ai file esistenti sono poche righe, così i conflitti con le nuove versioni di Firefox sono rari
@@ -92,6 +93,30 @@ chiude il telefono:
 
 Upstream, invece, Firefox sceglie la versione predefinita una sola volta, in base allo schermo su cui si avvia, e le
 schede aperte restano nella versione con cui sono state aperte.
+
+### Status bar nascosta insieme alla tab strip
+
+Per un aspetto più immersivo, mentre la tab strip è visibile Firefox **nasconde la status bar** (orologio, icone delle
+notifiche, batteria) e le schede stanno **a filo del bordo superiore** dello schermo. Quando la tab strip sparisce, la
+status bar torna; il passaggio avviene **al volo** aprendo e chiudendo il telefono:
+
+| Situazione                                                              | Status bar                           |
+|-------------------------------------------------------------------------|--------------------------------------|
+| Z Fold **aperto**, tablet (gli stessi casi in cui compare la tab strip) | ❌ nascosta, schede a filo del bordo |
+| Z Fold **chiuso**, telefono                                             | ✅ visibile                          |
+| Finestra divisa / pop-up, schede aperte da altre app (custom tab)       | ✅ visibile                          |
+| Preferenza «Tab strip» disattivata                                      | ✅ visibile                          |
+
+- Vale per tutta l'app (home, pagine, impostazioni...), non solo per la schermata con le schede.
+- Per vedere la status bar un attimo basta **trascinare il dito dal bordo superiore verso il basso** (un secondo
+  trascinamento apre le notifiche): compare sopra le schede, senza spostare nulla. Il menu principale e le finestre
+  di dialogo la lasciano nascosta; se qualche menu a comparsa la fa riapparire, anche lei si sovrappone alle schede
+  senza spostare l'interfaccia.
+- I video a schermo intero funzionano come prima; uscendone, la status bar resta nascosta.
+- Se lo schermo ha un foro per la fotocamera in alto, le schede ci passano sotto, come nelle app a schermo intero.
+- Serve Android 13 o successivo (prima, la status bar resta sempre visibile).
+
+Upstream, invece, la status bar è sempre visibile e la tab strip parte sotto di essa.
 
 ### Aspetto e comportamento delle schede, come in Chrome
 
@@ -222,11 +247,14 @@ File nuovi (`mobile/android/fenix/app/src/...`):
   tab strip (e per i siti desktop); è uno stato Compose aggiornato da `HomeActivity` a ogni cambio di configurazione
   (piega/apertura, rotazione, multi-finestra), così l'interfaccia si ricompone da sola.
 - `browser/tabstrip/ChromeStyleTabStrip.kt` — la nuova tab strip in stile Chrome.
+- `browser/tabstrip/ImmersiveTabStrip.kt` — nasconde la status bar mentre la tab strip è visibile (anche nelle
+  finestre di dialogo) e adatta gli insets passati all'interfaccia: status bar e foro della fotocamera in alto non
+  occupano spazio, così le schede stanno a filo del bordo e nulla si sposta se la status bar ricompare per un attimo.
 - `browser/desktopmode/AdaptiveDesktopModeMiddleware.kt` — fa sì che la versione desktop/mobile dei siti segua la
   finestra (al posto di `DesktopModeMiddleware`) e aggiorna le schede aperte quando cambia;
   `AdaptiveDesktopModeRepository.kt` salva la preferenza per schermo grande e piccolo e le schede con una versione
   scelta dal menu.
-- `test/.../browser/tabstrip/AdaptiveTabStripTest.kt`, `TabStripModeToggleTest.kt`,
+- `test/.../browser/tabstrip/AdaptiveTabStripTest.kt`, `ImmersiveTabStripTest.kt`, `TabStripModeToggleTest.kt`,
   `test/.../browser/desktopmode/AdaptiveDesktopModeMiddlewareTest.kt`, `AdaptiveDesktopModeRepositoryTest.kt` — test
   unitari.
 
@@ -235,7 +263,8 @@ Modifiche piccole ai file esistenti:
 - `utils/Settings.kt` — `isTabStripEnabled` = preferenza utente (`isTabStripPreferenceEnabled`) **e** finestra
   abbastanza grande; rimosso il blocco per i pieghevoli.
 - `HomeActivity.kt` — aggiorna `AdaptiveTabStrip` in `onCreate` e in `onConfigurationChanged` (prima dei fragment)
-  e ricostruisce l'interfaccia se la barra degli indirizzi deve cambiare posizione.
+  e ricostruisce l'interfaccia se la barra degli indirizzi deve cambiare posizione; avvia e aggiorna
+  `ImmersiveTabStrip`.
 - `BrowserToolbarComposable.kt`, `HomeToolbarComposable.kt` — ricalcolano la visibilità della strip quando cambia
   la finestra e la mostrano/nascondono con un'animazione.
 - `components/toolbar/BrowserToolbarMiddleware.kt`, `home/toolbar/BrowserToolbarMiddleware.kt` — ricostruiscono i
@@ -252,5 +281,6 @@ Modifiche piccole ai file esistenti:
 - Chrome riavvia sempre l'activity quando il Fold passa da "telefono" a "tablet"; qui succede solo se la barra
   degli indirizzi deve cambiare posizione, altrimenti il passaggio avviene al volo.
 - Colori, icone e caratteri sono quelli di Firefox, non di Google.
+- Chrome mostra sempre la status bar; qui, a telefono aperto e sui tablet, è nascosta insieme alla tab strip.
 - Non ci sono i gruppi di schede di Chrome nella strip (Firefox ha una propria barra dei gruppi, che resta come
   upstream) né le anteprime al passaggio del mouse.
