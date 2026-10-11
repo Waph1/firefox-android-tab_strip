@@ -76,6 +76,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Imposta la cartella delle chiavi Android
+        # Senza ANDROID_USER_HOME il plugin Android, sui runner di GitHub (che impostano XDG_CONFIG_HOME), cerca
+        # la chiave di firma in un'altra cartella e ne genera una temporanea: gli APK non si aggiornerebbero.
+        run: echo "ANDROID_USER_HOME=$HOME/.android" >> "$GITHUB_ENV"
+
       - name: Decidi cosa fare
         id: plan
         env:
@@ -135,6 +140,10 @@ jobs:
           cp "$APK" "$OUT"
           echo "APK=$OUT" >> "$GITHUB_ENV"
           ls -la "$OUT"
+
+      - name: Verifica la firma
+        if: ${{ steps.plan.outputs.build == 'true' && env.MODE == 'release' }}
+        run: chrome-tabstrip/scripts/ci-verify-signature.sh "$APK"
 
       - name: Pubblica la release
         if: ${{ steps.plan.outputs.build == 'true' && env.MODE == 'release' }}
