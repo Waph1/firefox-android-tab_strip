@@ -45,12 +45,324 @@ index 4364da68986..50eaab3670e 100644
      }
  
      final override fun recreate() {
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeMiddleware.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeMiddleware.kt
+new file mode 100644
+index 00000000000..5e2b6a44746
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeMiddleware.kt
+@@ -0,0 +1,211 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.browser.desktopmode
++
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.MainScope
++import kotlinx.coroutines.flow.Flow
++import kotlinx.coroutines.flow.distinctUntilChanged
++import kotlinx.coroutines.flow.map
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.sync.Mutex
++import kotlinx.coroutines.sync.withLock
++import mozilla.components.browser.state.action.BrowserAction
++import mozilla.components.browser.state.action.ContentAction
++import mozilla.components.browser.state.action.DefaultDesktopModeAction
++import mozilla.components.browser.state.action.EngineAction
++import mozilla.components.browser.state.action.InitAction
++import mozilla.components.browser.state.action.TabListAction
++import mozilla.components.browser.state.selector.findTab
++import mozilla.components.browser.state.state.BrowserState
++import mozilla.components.browser.state.state.CustomTabSessionState
++import mozilla.components.lib.state.Middleware
++import mozilla.components.lib.state.Store
++import mozilla.telemetry.glean.private.NoExtras
++import org.mozilla.fenix.GleanMetrics.DesktopMode
++import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
++import java.util.concurrent.ConcurrentHashMap
++
++/**
++ * [Middleware] making the desktop / mobile version of the sites follow the app window, like the tab strip does: with
++ * the default settings, a foldable shows desktop sites when unfolded and mobile sites when folded, and the open tabs
++ * switch version as soon as it is folded or unfolded. It replaces [DesktopModeMiddleware].
++ *
++ * - The "Always request desktop site" preference is remembered separately for large and small windows (see
++ *   [AdaptiveDesktopModeRepository]) and [BrowserState.desktopMode] holds the one of the current window.
++ * - When [BrowserState.desktopMode] changes (the window or the preference changed), the open tabs switch to it: the
++ *   selected tab (and the custom tabs, each shown in its own window) is reloaded immediately, the other tabs are
++ *   reloaded when they are selected.
++ * - A tab whose version is changed from the menu ("Desktop site") to the opposite of the default keeps it, until it is
++ *   changed back from the menu.
++ *
++ * @param repository [AdaptiveDesktopModeRepository] storing the preferences.
++ * @param isInitialWindowLarge Whether the app window is large, used until [isLargeWindow] reports a window.
++ * @param isLargeWindow [Flow] emitting whether the app window is large, or null until a window reports its size.
++ * @param ioScope [CoroutineScope] used for reading and writing the preferences.
++ * @param mainScope [CoroutineScope] used for updating the engine sessions.
++ */
++class AdaptiveDesktopModeMiddleware(
++    private val repository: AdaptiveDesktopModeRepository,
++    private val isInitialWindowLarge: () -> Boolean,
++    private val isLargeWindow: Flow<Boolean?> = AdaptiveTabStrip.isLargeWindow,
++    private val ioScope: CoroutineScope = CoroutineScope(Dispatchers.IO),
++    private val mainScope: CoroutineScope = MainScope(),
++) : Middleware<BrowserState, BrowserAction> {
++
++    // IDs of the tabs whose version was chosen from the menu: they don't follow the window.
++    private val tabsWithOwnDesktopMode: MutableSet<String> = ConcurrentHashMap.newKeySet()
++
++    // Tabs that switched version in the background, with the version their page was loaded in. They are reloaded when
++    // selected. Only used while the store processes an action.
++    private val tabsToReload = mutableMapOf<String, Boolean>()
++
++    // Serializes the preference reads and writes with the window changes.
++    private val preferencesMutex = Mutex()
++
++    // Whether [BrowserState.desktopMode] holds the preference of large or small windows; null until it is loaded.
++    @Volatile
++    private var isLargeWindowLoaded: Boolean? = null
++
++    override fun invoke(
++        store: Store<BrowserState, BrowserAction>,
++        next: (BrowserAction) -> Unit,
++        action: BrowserAction,
++    ) {
++        if (action is EngineAction.ToggleDesktopModeAction) {
++            onTabDesktopModeRequested(store, action)
++        }
++
++        val previousSelectedTabId = store.state.selectedTabId
++
++        next(action)
++
++        when (action) {
++            InitAction -> loadPreferences(store)
++            DefaultDesktopModeAction.ToggleDesktopMode -> {
++                saveDesktopModePreference(store)
++                updateTabs(store)
++            }
++            is DefaultDesktopModeAction.DesktopModeUpdated,
++            is TabListAction.RestoreAction,
++            -> updateTabs(store)
++            else -> Unit
++        }
++
++        val selectedTabId = store.state.selectedTabId
++        if (selectedTabId != null && selectedTabId != previousSelectedTabId) {
++            reloadIfNeeded(store, selectedTabId)
++        }
++    }
++
++    private fun loadPreferences(store: Store<BrowserState, BrowserAction>) {
++        ioScope.launch {
++            tabsWithOwnDesktopMode.addAll(repository.getTabsWithOwnDesktopMode())
++
++            isLargeWindow
++                .map { it ?: isInitialWindowLarge() }
++                .distinctUntilChanged()
++                .collect { isLarge ->
++                    preferencesMutex.withLock {
++                        val desktopMode = repository.getDesktopBrowsingEnabled(isLargeWindow = isLarge)
++                        isLargeWindowLoaded = isLarge
++                        store.dispatch(DefaultDesktopModeAction.DesktopModeUpdated(newValue = desktopMode))
++                    }
++                }
++        }
++    }
++
++    private fun saveDesktopModePreference(store: Store<BrowserState, BrowserAction>) {
++        ioScope.launch {
++            preferencesMutex.withLock {
++                val isLarge = isLargeWindowLoaded ?: isInitialWindowLarge()
++                val desktopMode = store.state.desktopMode
++                val preferenceWriteSucceeded =
++                    repository.setDesktopBrowsingEnabled(isLargeWindow = isLarge, enabled = desktopMode)
++
++                if (!preferenceWriteSucceeded) {
++                    // If the preference write fails, revert the state change.
++                    store.dispatch(DefaultDesktopModeAction.DesktopModeUpdated(newValue = !desktopMode))
++                } else if (desktopMode) {
++                    DesktopMode.settingsAlwaysRequestDesktopSite.record(NoExtras())
++                }
++            }
++        }
++    }
++
++    private fun onTabDesktopModeRequested(
++        store: Store<BrowserState, BrowserAction>,
++        action: EngineAction.ToggleDesktopModeAction,
++    ) {
++        // The action reloads the tab.
++        tabsToReload.remove(action.tabId)
++
++        // Choosing the version of the default makes the tab follow the window again.
++        val changed =
++            if (action.enable == store.state.desktopMode) {
++                tabsWithOwnDesktopMode.remove(action.tabId)
++            } else {
++                tabsWithOwnDesktopMode.add(action.tabId)
++            }
++        if (changed) {
++            saveTabsWithOwnDesktopMode(store)
++        }
++    }
++
++    private fun saveTabsWithOwnDesktopMode(store: Store<BrowserState, BrowserAction>) {
++        ioScope.launch {
++            preferencesMutex.withLock {
++                // Only the tabs restored after a restart (no private or custom tabs), so closed tabs are forgotten.
++                val restorableTabIds = store.state.tabs.filterNot { it.content.private }.map { it.id }.toSet()
++                repository.setTabsWithOwnDesktopMode(
++                    tabsWithOwnDesktopMode.filterTo(mutableSetOf()) { it in restorableTabIds },
++                )
++            }
++        }
++    }
++
++    private fun updateTabs(store: Store<BrowserState, BrowserAction>) {
++        // Until the preference of the current window is loaded, the default isn't known yet.
++        if (isLargeWindowLoaded == null) {
++            return
++        }
++
++        val state = store.state
++        val desktopMode = state.desktopMode
++        (state.tabs + state.customTabs)
++            .filter { it.content.desktopMode != desktopMode && it.id !in tabsWithOwnDesktopMode }
++            .forEach { tab ->
++                store.dispatch(ContentAction.UpdateTabDesktopMode(tab.id, desktopMode))
++
++                // Without an engine session, the tab is loaded in the right version when it gets one.
++                val engineSession = tab.engineState.engineSession ?: return@forEach
++
++                if (tab.id == state.selectedTabId || tab is CustomTabSessionState) {
++                    tabsToReload.remove(tab.id)
++                    mainScope.launch { engineSession.toggleDesktopMode(enable = desktopMode, reload = true) }
++                } else {
++                    val loadedDesktopMode = tabsToReload.remove(tab.id) ?: tab.content.desktopMode
++                    if (loadedDesktopMode != desktopMode) {
++                        tabsToReload[tab.id] = loadedDesktopMode
++                    }
++                    mainScope.launch { engineSession.toggleDesktopMode(enable = desktopMode, reload = false) }
++                }
++            }
++    }
++
++    private fun reloadIfNeeded(store: Store<BrowserState, BrowserAction>, tabId: String) {
++        if (tabsToReload.remove(tabId) == null) {
++            return
++        }
++
++        // Without an engine session, the tab is loaded in the right version when it gets one.
++        val tab = store.state.findTab(tabId) ?: return
++        val engineSession = tab.engineState.engineSession ?: return
++        val desktopMode = tab.content.desktopMode
++        // Also replaces a mobile URL (e.g. m.example.com) when switching to the desktop version.
++        mainScope.launch { engineSession.toggleDesktopMode(enable = desktopMode, reload = true) }
++    }
++}
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeRepository.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeRepository.kt
+new file mode 100644
+index 00000000000..6b48260d6cc
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeRepository.kt
+@@ -0,0 +1,89 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.browser.desktopmode
++
++import android.content.Context
++import androidx.datastore.core.DataStore
++import androidx.datastore.preferences.core.Preferences
++import androidx.datastore.preferences.core.booleanPreferencesKey
++import androidx.datastore.preferences.core.emptyPreferences
++import androidx.datastore.preferences.core.stringSetPreferencesKey
++import kotlinx.coroutines.flow.catch
++import kotlinx.coroutines.flow.first
++import kotlinx.coroutines.flow.map
++import org.mozilla.fenix.datastore.editOrCatch
++import org.mozilla.fenix.datastore.preferencesDataStore
++import java.io.IOException
++
++// The key of DefaultDesktopModeRepository: an existing preference keeps applying to large windows.
++private const val LARGE_WINDOW_DESKTOP_BROWSING_KEY = "desktop_browsing_key_2"
++private const val SMALL_WINDOW_DESKTOP_BROWSING_KEY = "desktop_browsing_small_window_key"
++private const val TABS_WITH_OWN_DESKTOP_MODE_KEY = "desktop_browsing_tabs_with_own_mode_key"
++
++private val largeWindowDesktopBrowsingKey = booleanPreferencesKey(LARGE_WINDOW_DESKTOP_BROWSING_KEY)
++private val smallWindowDesktopBrowsingKey = booleanPreferencesKey(SMALL_WINDOW_DESKTOP_BROWSING_KEY)
++private val tabsWithOwnDesktopModeKey = stringSetPreferencesKey(TABS_WITH_OWN_DESKTOP_MODE_KEY)
++
++/**
++ * Stores the desktop mode settings used by [AdaptiveDesktopModeMiddleware].
++ *
++ * The "Always request desktop site" preference is stored separately for large windows (tablets, the inner screen of an
++ * unfolded foldable) and small windows (phones, the cover screen of a foldable, narrow split-screen windows), so that
++ * it can follow the window when a foldable is folded or unfolded. Like upstream, desktop sites are requested by
++ * default in large windows only.
++ *
++ * @param context Android context used to obtain the underlying [DataStore].
++ * @param dataStore [DataStore] for accessing user preferences.
++ */
++class AdaptiveDesktopModeRepository(
++    context: Context,
++    private val dataStore: DataStore<Preferences> = context.preferencesDataStore,
++) {
++    private val preferences
++        get() = dataStore.data.catch { exception ->
++            if (exception is IOException) emit(emptyPreferences()) else throw exception
++        }
++
++    /**
++     * Returns whether desktop sites are requested by default for the newly opened tabs.
++     *
++     * @param isLargeWindow Whether the preference of large or small windows is wanted.
++     */
++    suspend fun getDesktopBrowsingEnabled(isLargeWindow: Boolean): Boolean =
++        preferences.map { it[desktopBrowsingKey(isLargeWindow)] ?: isLargeWindow }.first()
++
++    /**
++     * Updates whether desktop sites are requested by default for the newly opened tabs.
++     *
++     * @param isLargeWindow Whether the preference of large or small windows is updated.
++     * @param enabled Whether desktop sites are requested by default.
++     * @return Whether the preference was written.
++     */
++    suspend fun setDesktopBrowsingEnabled(isLargeWindow: Boolean, enabled: Boolean): Boolean {
++        var preferenceWriteSucceeded = true
++        dataStore.editOrCatch(onError = { preferenceWriteSucceeded = false }) { preferences ->
++            preferences[desktopBrowsingKey(isLargeWindow)] = enabled
++        }
++        return preferenceWriteSucceeded
++    }
++
++    /** Returns the IDs of the tabs whose site version was chosen from the menu and doesn't follow the window. */
++    suspend fun getTabsWithOwnDesktopMode(): Set<String> =
++        preferences.map { it[tabsWithOwnDesktopModeKey] ?: emptySet() }.first()
++
++    /**
++     * Updates the IDs of the tabs whose site version was chosen from the menu and doesn't follow the window.
++     *
++     * @param tabIds The IDs of those tabs.
++     */
++    suspend fun setTabsWithOwnDesktopMode(tabIds: Set<String>) {
++        dataStore.editOrCatch(onError = {}) { preferences ->
++            preferences[tabsWithOwnDesktopModeKey] = tabIds
++        }
++    }
++
++    private fun desktopBrowsingKey(isLargeWindow: Boolean) =
++        if (isLargeWindow) largeWindowDesktopBrowsingKey else smallWindowDesktopBrowsingKey
++}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStrip.kt
 new file mode 100644
-index 00000000000..dc85d3a2922
+index 00000000000..e4b7639c80b
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStrip.kt
-@@ -0,0 +1,105 @@
+@@ -0,0 +1,114 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -121,6 +433,14 @@ index 00000000000..dc85d3a2922
 +    /** [StateFlow] emitting every time the coarse [WindowLayout] of the app window changes. */
 +    val windowLayout: StateFlow<WindowLayout> = windowLayoutFlow.asStateFlow()
 +
++    private val largeWindowFlow = MutableStateFlow<Boolean?>(null)
++
++    /**
++     * Whether the app window is large enough for the tab strip (whatever the tab strip preference), or `null` until a
++     * window reports its size. Large windows also show desktop sites by default, see `AdaptiveDesktopModeMiddleware`.
++     */
++    val isLargeWindow: StateFlow<Boolean?> = largeWindowFlow.asStateFlow()
++
 +    /**
 +     * Updates the state from the window of [context] (the activity hosting the browser).
 +     *
@@ -154,6 +474,7 @@ index 00000000000..dc85d3a2922
 +                isWideWindow = screenWidthDp > WIDE_SCREEN_WIDTH_DP,
 +                isTallWindow = screenHeightDp > TALL_SCREEN_HEIGHT_DP,
 +            )
++        largeWindowFlow.value = isAllowed
 +    }
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
@@ -928,6 +1249,42 @@ index b57f3a1f225..c92339911e0 100644
 +        isLoading = content.loading,
      )
  }
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Core.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Core.kt
+index 45a68358d15..b95613e1254 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Core.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Core.kt
+@@ -118,8 +118,8 @@ import org.mozilla.fenix.Config
+ import org.mozilla.fenix.IntentReceiverActivity
+ import org.mozilla.fenix.R
+ import org.mozilla.fenix.ReleaseChannel
+-import org.mozilla.fenix.browser.desktopmode.DefaultDesktopModeRepository
+-import org.mozilla.fenix.browser.desktopmode.DesktopModeMiddleware
++import org.mozilla.fenix.browser.desktopmode.AdaptiveDesktopModeMiddleware
++import org.mozilla.fenix.browser.desktopmode.AdaptiveDesktopModeRepository
+ import org.mozilla.fenix.components.search.ApplicationSearchMiddleware
+ import org.mozilla.fenix.components.search.SearchMigration
+ import org.mozilla.fenix.components.search.SearchWidgetMiddleware
+@@ -153,6 +153,7 @@ import org.mozilla.fenix.telemetry.TelemetryMiddleware
+ import org.mozilla.fenix.translations.TranslationsEnabledSettings
+ import org.mozilla.fenix.utils.Settings.DeleteDownloadBehavior
+ import org.mozilla.fenix.utils.getUndoDelay
++import org.mozilla.fenix.utils.isLargeScreenSize
+ import org.mozilla.geckoview.GeckoRuntime
+ 
+ internal val ADDITIONAL_BUNDLED_SEARCH_ENGINE_IDS = listOf("reddit", "youtube")
+@@ -382,7 +383,11 @@ class Core(
+                 SaveToPDFMiddleware(context),
+                 FxSuggestFactsMiddleware(),
+                 FileUploadsDirCleanerMiddleware(fileUploadsDirCleaner),
+-                DesktopModeMiddleware(repository = DefaultDesktopModeRepository(context = context)),
++                // Like the tab strip, desktop / mobile sites follow the window (e.g. a foldable is folded / unfolded).
++                AdaptiveDesktopModeMiddleware(
++                    repository = AdaptiveDesktopModeRepository(context = context),
++                    isInitialWindowLarge = { context.isLargeScreenSize() },
++                ),
+                 ApplicationSearchMiddleware(context),
+                 SearchWidgetMiddleware(context),
+                 // We are disabling automatically initializing translations so that we can control when
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
 index b19a37d5512..c458ea75998 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
@@ -1093,6 +1450,48 @@ index 8eaf185575f..4f2896cc81d 100644
              setupToolbarLayout()
              updateToolbarShortcut()
              true
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/sitepermissions/SiteSettingsFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/sitepermissions/SiteSettingsFragment.kt
+index f3db19efd63..6f90b362113 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/sitepermissions/SiteSettingsFragment.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/sitepermissions/SiteSettingsFragment.kt
+@@ -5,6 +5,7 @@
+ package org.mozilla.fenix.settings.sitepermissions
+ 
+ import android.os.Bundle
++import android.view.View
+ import androidx.navigation.findNavController
+ import androidx.navigation.fragment.navArgs
+ import androidx.preference.Preference
+@@ -13,7 +14,10 @@ import androidx.preference.PreferenceFragmentCompat
+ import androidx.preference.SwitchPreferenceCompat
+ import com.google.android.material.R as materialR
+ import com.google.android.material.color.MaterialColors
++import kotlinx.coroutines.flow.distinctUntilChanged
++import kotlinx.coroutines.flow.map
+ import mozilla.components.browser.state.action.DefaultDesktopModeAction
++import mozilla.components.lib.state.ext.consumeFlow
+ import mozilla.telemetry.glean.private.NoExtras
+ import org.mozilla.fenix.GleanMetrics.Autoplay
+ import org.mozilla.fenix.R
+@@ -40,6 +44,18 @@ class SiteSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragm
+         bindDesktopMode()
+     }
+ 
++    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
++        super.onViewCreated(view, savedInstanceState)
++
++        // The default desktop mode follows the window (e.g. a foldable is folded / unfolded): keep the switch in sync.
++        val desktopModePreference = requirePreference<SwitchPreferenceCompat>(R.string.pref_key_desktop_browsing)
++        consumeFlow(requireComponents.core.store) { flow ->
++            flow.map { state -> state.desktopMode }
++                .distinctUntilChanged()
++                .collect { desktopMode -> desktopModePreference.isChecked = desktopMode }
++        }
++    }
++
+     override fun onResume() {
+         super.onResume()
+         showToolbar(getString(R.string.preferences_site_settings))
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt
 index 605e14db948..83b5e11b53f 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt
@@ -1230,12 +1629,482 @@ index e4d1174f1e4..c0f28d14c80 100644
      <dimen name="browser_microsurvey_height">131dp</dimen>
  
      <!-- Home Fragment -->
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeMiddlewareTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeMiddlewareTest.kt
+new file mode 100644
+index 00000000000..a5d51722b06
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeMiddlewareTest.kt
+@@ -0,0 +1,381 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.browser.desktopmode
++
++import io.mockk.coEvery
++import io.mockk.coVerify
++import io.mockk.mockk
++import io.mockk.verify
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.cancel
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.test.StandardTestDispatcher
++import kotlinx.coroutines.test.runTest
++import mozilla.components.browser.state.action.BrowserAction
++import mozilla.components.browser.state.action.ContentAction
++import mozilla.components.browser.state.action.DefaultDesktopModeAction
++import mozilla.components.browser.state.action.EngineAction
++import mozilla.components.browser.state.action.TabListAction
++import mozilla.components.browser.state.selector.findCustomTab
++import mozilla.components.browser.state.selector.findTab
++import mozilla.components.browser.state.state.BrowserState
++import mozilla.components.browser.state.state.CustomTabSessionState
++import mozilla.components.browser.state.state.SessionState
++import mozilla.components.browser.state.state.TabSessionState
++import mozilla.components.browser.state.state.createCustomTab
++import mozilla.components.browser.state.state.createTab
++import mozilla.components.browser.state.state.recover.RecoverableTab
++import mozilla.components.browser.state.state.recover.TabState
++import mozilla.components.browser.state.store.BrowserStore
++import mozilla.components.concept.engine.EngineSession
++import mozilla.components.lib.state.Middleware
++import mozilla.components.support.test.robolectric.testContext
++import org.junit.After
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNotNull
++import org.junit.Assert.assertTrue
++import org.junit.Rule
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.mozilla.fenix.GleanMetrics.DesktopMode
++import org.mozilla.fenix.helpers.FenixGleanTestRule
++import org.robolectric.RobolectricTestRunner
++
++@RunWith(RobolectricTestRunner::class)
++class AdaptiveDesktopModeMiddlewareTest {
++
++    @get:Rule val gleanTestRule = FenixGleanTestRule(testContext)
++
++    private val testDispatcher = StandardTestDispatcher()
++    private val scope = CoroutineScope(testDispatcher)
++    private val isLargeWindow = MutableStateFlow<Boolean?>(null)
++
++    // Saved preferences: like upstream, desktop sites by default in large windows only.
++    private val desktopBrowsingPreference = mutableMapOf(true to true, false to false)
++    private var savedTabsWithOwnDesktopMode = emptySet<String>()
++
++    private val repository: AdaptiveDesktopModeRepository =
++        mockk {
++            coEvery { getDesktopBrowsingEnabled(any()) } answers { desktopBrowsingPreference.getValue(firstArg()) }
++            coEvery { setDesktopBrowsingEnabled(any(), any()) } answers {
++                desktopBrowsingPreference[firstArg()] = secondArg()
++                true
++            }
++            coEvery { getTabsWithOwnDesktopMode() } answers { savedTabsWithOwnDesktopMode }
++            coEvery { setTabsWithOwnDesktopMode(any()) } answers { savedTabsWithOwnDesktopMode = firstArg() }
++        }
++
++    // Stands in for the EngineMiddleware: the engine session reports the new desktop mode of the tab.
++    private val engineMiddleware: Middleware<BrowserState, BrowserAction> = { store, next, action ->
++        if (action is EngineAction.ToggleDesktopModeAction) {
++            store.dispatch(ContentAction.UpdateTabDesktopMode(action.tabId, action.enable))
++        } else {
++            next(action)
++        }
++    }
++
++    @After
++    fun tearDown() {
++        scope.cancel()
++    }
++
++    @Test
++    fun `GIVEN no window reported yet WHEN the store is created THEN the preference of the initial window is used`() =
++        runTest(testDispatcher) {
++            val store =
++                createStore(isInitialWindowLarge = true, tabs = listOf(createTab("https://a.com", id = "a")))
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            assertTrue(store.state.desktopMode)
++            assertTrue(store.desktopModeOf("a"))
++        }
++
++    @Test
++    fun `GIVEN a large window WHEN the store is created THEN the tabs follow the preference of large windows`() =
++        runTest(testDispatcher) {
++            isLargeWindow.value = true
++            val store =
++                createStore(
++                    isInitialWindowLarge = false,
++                    tabs =
++                        listOf(
++                            createTab("https://a.com", id = "a", desktopMode = false),
++                            createTab("https://b.com", id = "b", desktopMode = true),
++                        ),
++                )
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            assertTrue(store.state.desktopMode)
++            assertTrue(store.desktopModeOf("a"))
++            assertTrue(store.desktopModeOf("b"))
++        }
++
++    @Test
++    fun `GIVEN an unfolded foldable WHEN it is folded THEN the selected tab is reloaded in the mobile version`() =
++        runTest(testDispatcher) {
++            isLargeWindow.value = true
++            val selectedSession: EngineSession = mockk(relaxed = true)
++            val backgroundSession: EngineSession = mockk(relaxed = true)
++            val store =
++                createStore(
++                    tabs =
++                        listOf(
++                            createTab("https://a.com", id = "a", desktopMode = true, engineSession = selectedSession),
++                            createTab("https://b.com", id = "b", desktopMode = true, engineSession = backgroundSession),
++                            createTab("https://c.com", id = "c", desktopMode = true),
++                        ),
++                    selectedTabId = "a",
++                )
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            isLargeWindow.value = false
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            assertFalse(store.state.desktopMode)
++            assertFalse(store.desktopModeOf("a"))
++            assertFalse(store.desktopModeOf("b"))
++            assertFalse(store.desktopModeOf("c"))
++            verify(exactly = 1) { selectedSession.toggleDesktopMode(enable = false, reload = true) }
++            verify(exactly = 1) { backgroundSession.toggleDesktopMode(enable = false, reload = false) }
++            verify(exactly = 0) { backgroundSession.toggleDesktopMode(any(), reload = true) }
++
++            // The background tab is reloaded in the mobile version once selected.
++            store.dispatch(TabListAction.SelectTabAction("b"))
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            verify(exactly = 1) { backgroundSession.toggleDesktopMode(enable = false, reload = true) }
++
++            // But only once.
++            store.dispatch(TabListAction.SelectTabAction("a"))
++            store.dispatch(TabListAction.SelectTabAction("b"))
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            verify(exactly = 1) { backgroundSession.toggleDesktopMode(enable = false, reload = true) }
++        }
++
++    @Test
++    fun `GIVEN a background tab switched version WHEN it switches back before being selected THEN it is not reloaded`() =
++        runTest(testDispatcher) {
++            isLargeWindow.value = true
++            val backgroundSession: EngineSession = mockk(relaxed = true)
++            val store =
++                createStore(
++                    tabs =
++                        listOf(
++                            createTab("https://a.com", id = "a", desktopMode = true),
++                            createTab("https://b.com", id = "b", desktopMode = true, engineSession = backgroundSession),
++                        ),
++                    selectedTabId = "a",
++                )
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            isLargeWindow.value = false
++            testDispatcher.scheduler.advanceUntilIdle()
++            isLargeWindow.value = true
++            testDispatcher.scheduler.advanceUntilIdle()
++            store.dispatch(TabListAction.SelectTabAction("b"))
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            assertTrue(store.desktopModeOf("b"))
++            verify(exactly = 1) { backgroundSession.toggleDesktopMode(enable = false, reload = false) }
++            verify(exactly = 1) { backgroundSession.toggleDesktopMode(enable = true, reload = false) }
++            verify(exactly = 0) { backgroundSession.toggleDesktopMode(any(), reload = true) }
++        }
++
++    @Test
++    fun `GIVEN a custom tab WHEN the window changes THEN it is reloaded in the new version`() =
++        runTest(testDispatcher) {
++            isLargeWindow.value = true
++            val session: EngineSession = mockk(relaxed = true)
++            val customTab = createCustomTab("https://c.com", id = "custom", desktopMode = true, engineSession = session)
++            val store = createStore(customTabs = listOf(customTab))
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            isLargeWindow.value = false
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            assertFalse(store.state.findCustomTab("custom")!!.content.desktopMode)
++            verify(exactly = 1) { session.toggleDesktopMode(enable = false, reload = true) }
++        }
++
++    @Test
++    fun `GIVEN a tab switched from the menu to the other version WHEN the window changes THEN the tab keeps it`() =
++        runTest(testDispatcher) {
++            isLargeWindow.value = false
++            val store =
++                createStore(
++                    tabs =
++                        listOf(
++                            createTab("https://a.com", id = "a"),
++                            createTab("https://b.com", id = "b"),
++                        ),
++                    selectedTabId = "a",
++                )
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            // On the cover screen, the user requests the desktop site of "a".
++            store.dispatch(EngineAction.ToggleDesktopModeAction("a", enable = true))
++            testDispatcher.scheduler.advanceUntilIdle()
++            assertEquals(setOf("a"), savedTabsWithOwnDesktopMode)
++
++            isLargeWindow.value = true
++            testDispatcher.scheduler.advanceUntilIdle()
++            isLargeWindow.value = false
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            assertTrue(store.desktopModeOf("a"))
++            assertFalse(store.desktopModeOf("b"))
++
++            // Requesting the version of the default makes the tab follow the window again.
++            store.dispatch(EngineAction.ToggleDesktopModeAction("a", enable = false))
++            testDispatcher.scheduler.advanceUntilIdle()
++            assertEquals(emptySet<String>(), savedTabsWithOwnDesktopMode)
++
++            isLargeWindow.value = true
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            assertTrue(store.desktopModeOf("a"))
++            assertTrue(store.desktopModeOf("b"))
++        }
++
++    @Test
++    fun `GIVEN private tabs switched from the menu WHEN saving the tabs with their own version THEN they are not saved`() =
++        runTest(testDispatcher) {
++            isLargeWindow.value = false
++            val store =
++                createStore(
++                    tabs =
++                        listOf(
++                            createTab("https://a.com", id = "a"),
++                            createTab("https://private.com", id = "private", private = true),
++                        ),
++                )
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            store.dispatch(EngineAction.ToggleDesktopModeAction("a", enable = true))
++            store.dispatch(EngineAction.ToggleDesktopModeAction("private", enable = true))
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            assertEquals(setOf("a"), savedTabsWithOwnDesktopMode)
++
++            // The private tab still keeps its version while the app runs.
++            isLargeWindow.value = true
++            testDispatcher.scheduler.advanceUntilIdle()
++            isLargeWindow.value = false
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            assertTrue(store.desktopModeOf("private"))
++        }
++
++    @Test
++    fun `GIVEN saved tabs with their own version WHEN the store is created THEN they keep it`() =
++        runTest(testDispatcher) {
++            isLargeWindow.value = false
++            savedTabsWithOwnDesktopMode = setOf("a")
++            val store =
++                createStore(
++                    tabs =
++                        listOf(
++                            createTab("https://a.com", id = "a", desktopMode = true),
++                            createTab("https://b.com", id = "b", desktopMode = true),
++                        ),
++                )
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            assertTrue(store.desktopModeOf("a"))
++            assertFalse(store.desktopModeOf("b"))
++        }
++
++    @Test
++    fun `GIVEN the preferences are loaded WHEN tabs are restored THEN they follow the window`() =
++        runTest(testDispatcher) {
++            isLargeWindow.value = true
++            val store = createStore()
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            store.dispatch(
++                TabListAction.RestoreAction(
++                    tabs = listOf(RecoverableTab(null, TabState(id = "a", url = "https://a.com"))),
++                    restoreLocation = TabListAction.RestoreAction.RestoreLocation.BEGINNING,
++                ),
++            )
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            assertTrue(store.desktopModeOf("a"))
++        }
++
++    @Test
++    fun `WHEN the preference is toggled THEN it is saved for the current window and the tabs follow it`() =
++        runTest(testDispatcher) {
++            isLargeWindow.value = true
++            val store = createStore(tabs = listOf(createTab("https://a.com", id = "a")))
++            testDispatcher.scheduler.advanceUntilIdle()
++            assertTrue(store.desktopModeOf("a"))
++
++            store.dispatch(DefaultDesktopModeAction.ToggleDesktopMode)
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            assertFalse(store.state.desktopMode)
++            assertFalse(store.desktopModeOf("a"))
++            coVerify { repository.setDesktopBrowsingEnabled(isLargeWindow = true, enabled = false) }
++            assertEquals(false, desktopBrowsingPreference[true])
++            assertEquals(false, desktopBrowsingPreference[false])
++
++            // The small window keeps its own preference.
++            store.dispatch(DefaultDesktopModeAction.ToggleDesktopMode)
++            testDispatcher.scheduler.advanceUntilIdle()
++            isLargeWindow.value = false
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            assertFalse(store.state.desktopMode)
++            store.dispatch(DefaultDesktopModeAction.ToggleDesktopMode)
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            assertTrue(store.state.desktopMode)
++            assertEquals(true, desktopBrowsingPreference[true])
++            assertEquals(true, desktopBrowsingPreference[false])
++            assertNotNull(DesktopMode.settingsAlwaysRequestDesktopSite.testGetValue())
++        }
++
++    @Test
++    fun `GIVEN the preference cannot be saved WHEN it is toggled THEN the change is reverted`() =
++        runTest(testDispatcher) {
++            isLargeWindow.value = true
++            coEvery { repository.setDesktopBrowsingEnabled(any(), any()) } returns false
++            val store = createStore()
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            store.dispatch(DefaultDesktopModeAction.ToggleDesktopMode)
++            testDispatcher.scheduler.advanceUntilIdle()
++
++            assertTrue(store.state.desktopMode)
++        }
++
++    private fun createStore(
++        isInitialWindowLarge: Boolean = false,
++        tabs: List<TabSessionState> = emptyList(),
++        customTabs: List<CustomTabSessionState> = emptyList(),
++        selectedTabId: String? = tabs.firstOrNull()?.id,
++    ) = BrowserStore(
++        initialState = BrowserState(tabs = tabs, customTabs = customTabs, selectedTabId = selectedTabId),
++        middleware =
++            listOf(
++                AdaptiveDesktopModeMiddleware(
++                    repository = repository,
++                    isInitialWindowLarge = { isInitialWindowLarge },
++                    isLargeWindow = isLargeWindow,
++                    ioScope = scope,
++                    mainScope = scope,
++                ),
++                engineMiddleware,
++            ),
++    )
++
++    private fun BrowserStore.desktopModeOf(tabId: String): Boolean {
++        val tab: SessionState = requireNotNull(state.findTab(tabId))
++        return tab.content.desktopMode
++    }
++}
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeRepositoryTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeRepositoryTest.kt
+new file mode 100644
+index 00000000000..eb979e22f81
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeRepositoryTest.kt
+@@ -0,0 +1,77 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.browser.desktopmode
++
++import android.content.Context
++import androidx.datastore.core.DataStore
++import androidx.datastore.preferences.core.Preferences
++import androidx.datastore.preferences.core.edit
++import androidx.datastore.preferences.preferencesDataStore
++import androidx.test.ext.junit.runners.AndroidJUnit4
++import kotlinx.coroutines.test.runTest
++import mozilla.components.support.test.robolectric.testContext
++import org.junit.After
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import org.junit.runner.RunWith
++
++private val Context.testDataStore: DataStore<Preferences> by preferencesDataStore(
++    name = "AdaptiveDesktopModeRepositoryTest",
++)
++
++@RunWith(AndroidJUnit4::class)
++class AdaptiveDesktopModeRepositoryTest {
++
++    private val repository =
++        AdaptiveDesktopModeRepository(context = testContext, dataStore = testContext.testDataStore)
++
++    @After
++    fun teardown() = runTest {
++        testContext.testDataStore.edit { it.clear() }
++    }
++
++    @Test
++    fun `WHEN the repository is read for the first time THEN desktop sites are requested in large windows only`() =
++        runTest {
++            assertTrue(repository.getDesktopBrowsingEnabled(isLargeWindow = true))
++            assertFalse(repository.getDesktopBrowsingEnabled(isLargeWindow = false))
++        }
++
++    @Test
++    fun `WHEN the preference of a window is written THEN the preference of the other window is unchanged`() =
++        runTest {
++            assertTrue(repository.setDesktopBrowsingEnabled(isLargeWindow = false, enabled = true))
++            assertTrue(repository.getDesktopBrowsingEnabled(isLargeWindow = false))
++            assertTrue(repository.getDesktopBrowsingEnabled(isLargeWindow = true))
++
++            assertTrue(repository.setDesktopBrowsingEnabled(isLargeWindow = true, enabled = false))
++            assertFalse(repository.getDesktopBrowsingEnabled(isLargeWindow = true))
++            assertTrue(repository.getDesktopBrowsingEnabled(isLargeWindow = false))
++        }
++
++    @Test
++    fun `GIVEN the upstream preference was set WHEN the repository is read THEN it applies to large windows`() =
++        runTest {
++            DefaultDesktopModeRepository(context = testContext, dataStore = testContext.testDataStore)
++                .setDesktopBrowsingEnabled(enabled = false)
++
++            assertFalse(repository.getDesktopBrowsingEnabled(isLargeWindow = true))
++            assertFalse(repository.getDesktopBrowsingEnabled(isLargeWindow = false))
++        }
++
++    @Test
++    fun `WHEN the tabs with their own desktop mode are written THEN they are read back`() =
++        runTest {
++            assertEquals(emptySet<String>(), repository.getTabsWithOwnDesktopMode())
++
++            repository.setTabsWithOwnDesktopMode(setOf("a", "b"))
++            assertEquals(setOf("a", "b"), repository.getTabsWithOwnDesktopMode())
++
++            repository.setTabsWithOwnDesktopMode(emptySet())
++            assertEquals(emptySet<String>(), repository.getTabsWithOwnDesktopMode())
++        }
++}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt
 new file mode 100644
-index 00000000000..e4e5e3a8ddf
+index 00000000000..bb0917c9e30
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,95 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -1268,6 +2137,7 @@ index 00000000000..e4e5e3a8ddf
 +        AdaptiveTabStrip.update(isTabletScreen = true, screenWidthDp = 690, screenHeightDp = 829)
 +
 +        assertTrue(AdaptiveTabStrip.isTabStripAllowed)
++        assertEquals(true, AdaptiveTabStrip.isLargeWindow.value)
 +        assertEquals(
 +            AdaptiveTabStrip.WindowLayout(isTabStripAllowed = true, isWideWindow = true, isTallWindow = true),
 +            AdaptiveTabStrip.windowLayout.value,
@@ -1282,6 +2152,7 @@ index 00000000000..e4e5e3a8ddf
 +
 +        AdaptiveTabStrip.update(isTabletScreen = false, screenWidthDp = 960, screenHeightDp = 411)
 +        assertFalse(AdaptiveTabStrip.isTabStripAllowed)
++        assertEquals(false, AdaptiveTabStrip.isLargeWindow.value)
 +        assertEquals(
 +            AdaptiveTabStrip.WindowLayout(isTabStripAllowed = false, isWideWindow = true, isTallWindow = false),
 +            AdaptiveTabStrip.windowLayout.value,

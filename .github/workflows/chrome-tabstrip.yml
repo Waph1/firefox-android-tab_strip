@@ -152,7 +152,8 @@ jobs:
         run: |
           cat > "$RUNNER_TEMP/notes.md" <<EOF
           Firefox per Android **$FX_VERSION** (versione stabile) con la tab strip in stile Chrome, che compare e
-          scompare aprendo e chiudendo il telefono pieghevole.
+          scompare aprendo e chiudendo il telefono pieghevole, e con i siti che passano dalla versione desktop
+          (telefono aperto) a quella mobile (telefono chiuso).
 
           **Come installarlo dal telefono**
           1. Scarica qui sotto il file \`$(basename "$APK")\`.
