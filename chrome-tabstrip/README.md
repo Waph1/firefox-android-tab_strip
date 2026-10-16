@@ -62,9 +62,10 @@ Quando si apre o si chiude il telefono:
 - con la **barra degli indirizzi in alto**, la tab strip appare/scompare **al volo**, con un'animazione, e tutto il
   resto si adatta subito: altezza della toolbar e dell'area della pagina, pulsanti della toolbar
   (avanti/indietro/ricarica sugli schermi larghi), gradiente della status bar;
-- con la **barra degli indirizzi in basso** (sul telefono chiuso), aprendolo la barra deve salire in alto insieme
-  alla tab strip, come in Chrome: Firefox ricostruisce la schermata (si riavvia l'activity, le schede restano dove
-  sono), esattamente come fa Chrome quando un pieghevole passa da "telefono" a "tablet".
+- con la **barra degli indirizzi in basso** o con la **tab strip in basso** (da Firefox 158 la posizione di entrambe
+  si sceglie in **Impostazioni → Personalizza**), Firefox ricostruisce la schermata (si riavvia l'activity, le
+  schede restano dove sono), esattamente come fa Chrome quando un pieghevole passa da "telefono" a "tablet". La barra
+  degli indirizzi resta dove l'hai messa; la tab strip compare in alto o in basso secondo la preferenza.
 
 Upstream, invece, Firefox **disabilita** la tab strip sui pieghevoli (controllo della cerniera in
 `Settings.isTabStripEligible`) e decide una sola volta all'avvio.
@@ -141,17 +142,18 @@ Upstream, invece, la status bar è sempre visibile e la tab strip parte sotto di
 Colori e icone restano quelli di Firefox (tema chiaro/scuro/privato e sfondi della home compresi).
 
 La preferenza **Impostazioni → Personalizza → Tab strip** continua a funzionare: se attiva (predefinito), la strip
-compare automaticamente quando c'è spazio; se disattivata non compare mai.
+compare automaticamente quando c'è spazio; se disattivata non compare mai. Quando è attiva si può scegliere anche la
+**posizione della tab strip** (in alto o in basso), pure dallo schermo esterno.
 
 ## Versione di Firefox
 
 La patch segue le **versioni stabili** di Firefox per Android: gli script scaricano automaticamente l'ultima
-versione stabile pubblicata, cioè il tag `FIREFOX-ANDROID_<versione>_RELEASE` più recente (oggi **157.0.1**), che è
+versione stabile pubblicata, cioè il tag `FIREFOX-ANDROID_<versione>_RELEASE` più recente (oggi **158.0**), che è
 esattamente il codice da cui Mozilla compila Firefox per il Play Store. Il file [`UPSTREAM_BASE`](UPSTREAM_BASE)
 indica il commit di Firefox su cui la patch è stata verificata l'ultima volta.
 
 Per provare un'altra versione basta la variabile `FIREFOX_VERSION`: `beta`, `main` (Nightly) o un tag preciso, ad es.
-`FIREFOX_VERSION=FIREFOX-ANDROID_157_0_RELEASE chrome-tabstrip/scripts/fetch-firefox.sh ~/firefox`.
+`FIREFOX_VERSION=FIREFOX-ANDROID_158_0_RELEASE chrome-tabstrip/scripts/fetch-firefox.sh ~/firefox`.
 
 ## Uso rapido
 
@@ -263,8 +265,8 @@ Modifiche piccole ai file esistenti:
 - `utils/Settings.kt` — `isTabStripEnabled` = preferenza utente (`isTabStripPreferenceEnabled`) **e** finestra
   abbastanza grande; rimosso il blocco per i pieghevoli.
 - `HomeActivity.kt` — aggiorna `AdaptiveTabStrip` in `onCreate` e in `onConfigurationChanged` (prima dei fragment)
-  e ricostruisce l'interfaccia se la barra degli indirizzi deve cambiare posizione; avvia e aggiorna
-  `ImmersiveTabStrip`.
+  e ricostruisce l'interfaccia quando la strip compare/scompare con la barra degli indirizzi o la strip in basso;
+  avvia e aggiorna `ImmersiveTabStrip`.
 - `BrowserToolbarComposable.kt`, `HomeToolbarComposable.kt` — ricalcolano la visibilità della strip quando cambia
   la finestra e la mostrano/nascondono con un'animazione.
 - `components/toolbar/BrowserToolbarMiddleware.kt`, `home/toolbar/BrowserToolbarMiddleware.kt` — ricostruiscono i
@@ -272,7 +274,8 @@ Modifiche piccole ai file esistenti:
 - `StatusBarColorManager.kt`, `TabStripStatusBarView.kt` — il gradiente della status bar segue la strip.
 - `components/Core.kt` — usa `AdaptiveDesktopModeMiddleware`; `SiteSettingsFragment.kt` — l'interruttore «Richiedi
   sempre sito desktop» si aggiorna se si apre/chiude il telefono con la schermata aperta.
-- `CustomizationFragment.kt` — l'interruttore nelle impostazioni usa la preferenza utente.
+- `CustomizationFragment.kt` — l'interruttore e la posizione della strip nelle impostazioni usano la preferenza
+  utente.
 - `TabStrip.kt` (usa `ChromeStyleTabStripContent`), `TabStripState.kt` (stato di caricamento), `dimens.xml`
   (altezza 40dp), `StatusBarColorManagerTest.kt` (adeguato alle modifiche).
 

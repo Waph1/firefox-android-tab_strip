@@ -36,7 +36,12 @@ if [ "$MODE" = "--check" ]; then
             info "OK (merge a 3 vie): $(basename "$patch") si applica, ma conviene rigenerarla con refresh.sh"
         else
             echo "KO: $(basename "$patch") non si applica più. File in conflitto:" >&2
-            GIT_INDEX_FILE="$TMP_INDEX" git ls-files --unmerged | cut -f2 | sort -u >&2
+            CONFLICTS="$(GIT_INDEX_FILE="$TMP_INDEX" git ls-files --unmerged | cut -f2 | sort -u)"
+            # Senza la versione di Firefox da cui è stata generata la patch (ad es. in un clone senza storia, come su
+            # GitHub) il merge a 3 vie non parte nemmeno: elenca i file in cui la patch non si applica così com'è.
+            [ -n "$CONFLICTS" ] || CONFLICTS="$(git apply --check "$patch" 2>&1 |
+                sed -n 's/^error: patch failed: \(.*\):[0-9]*$/\1/p' | sort -u || true)"
+            echo "$CONFLICTS" >&2
             status=1
         fi
     done
