@@ -36,7 +36,7 @@ salvata nel repository **cifrata**; per cifrarla e decifrarla serve una password
 Dal giorno dopo (o subito: **Actions → Chrome-like tab strip → Run workflow → Run workflow**) compare la prima
 Release. Per installarla dal telefono: apri la Release, scarica il file `.apk`, aprilo e consenti l'installazione.
 Il Firefox del Play Store va prima disinstallato (ha una firma diversa): sincronizza prima i dati con il tuo account
-Mozilla. Per gli aggiornamenti successivi basta scaricare e installare l'APK della nuova Release.
+Mozilla. Gli aggiornamenti successivi si installano **dall'app stessa** (vedi «Aggiornamenti dall'app»).
 
 Se una nuova versione di Firefox cambia il codice toccato dalla patch, la compilazione fallisce e GitHub ti manda
 un'e-mail: la patch va aggiornata (vedi «Quando esce una nuova versione di Firefox»), finché resta disponibile
@@ -62,9 +62,10 @@ Quando si apre o si chiude il telefono:
 - con la **barra degli indirizzi in alto**, la tab strip appare/scompare **al volo**, con un'animazione, e tutto il
   resto si adatta subito: altezza della toolbar e dell'area della pagina, pulsanti della toolbar
   (avanti/indietro/ricarica sugli schermi larghi), gradiente della status bar;
-- con la **barra degli indirizzi in basso** (sul telefono chiuso), aprendolo la barra deve salire in alto insieme
-  alla tab strip, come in Chrome: Firefox ricostruisce la schermata (si riavvia l'activity, le schede restano dove
-  sono), esattamente come fa Chrome quando un pieghevole passa da "telefono" a "tablet".
+- con la **barra degli indirizzi in basso** o con la **tab strip in basso** (da Firefox 158 la posizione di entrambe
+  si sceglie in **Impostazioni → Personalizza**), Firefox ricostruisce la schermata (si riavvia l'activity, le
+  schede restano dove sono), esattamente come fa Chrome quando un pieghevole passa da "telefono" a "tablet". La barra
+  degli indirizzi resta dove l'hai messa; la tab strip compare in alto o in basso secondo la preferenza.
 
 Upstream, invece, Firefox **disabilita** la tab strip sui pieghevoli (controllo della cerniera in
 `Settings.isTabStripEligible`) e decide una sola volta all'avvio.
@@ -141,17 +142,32 @@ Upstream, invece, la status bar è sempre visibile e la tab strip parte sotto di
 Colori e icone restano quelli di Firefox (tema chiaro/scuro/privato e sfondi della home compresi).
 
 La preferenza **Impostazioni → Personalizza → Tab strip** continua a funzionare: se attiva (predefinito), la strip
-compare automaticamente quando c'è spazio; se disattivata non compare mai.
+compare automaticamente quando c'è spazio; se disattivata non compare mai. Quando è attiva si può scegliere anche la
+**posizione della tab strip** (in alto o in basso), pure dallo schermo esterno.
+
+### Aggiornamenti dall'app
+
+Gli APK pubblicati nelle Release si aggiornano da soli, come le app installate fuori dal Play Store:
+
+- una volta al giorno, all'apertura, Firefox legge il file `update.json` dell'ultima Release di questo repository;
+- se c'è una versione più recente, firmata con la stessa chiave, chiede **«Aggiornamento disponibile… Vuoi
+  aggiornare ora?»**: con **Aggiorna** scarica l'APK (con la barra di avanzamento) e apre l'installazione di Android,
+  che chiede l'ultima conferma; con **Più tardi** lo richiede il giorno dopo;
+- la prima volta Android chiede di **consentire a Firefox di installare app** (Impostazioni → Installa app
+  sconosciute): basta attivare l'interruttore e tornare indietro.
+
+Le build compilate sul computer (firmate con un'altra chiave) e le varianti `nightly`/`debug` non propongono mai
+aggiornamenti. Chi usa un fork con le proprie Release deve cambiare `UPDATE_INFO_URL` in `SelfUpdater.kt`.
 
 ## Versione di Firefox
 
 La patch segue le **versioni stabili** di Firefox per Android: gli script scaricano automaticamente l'ultima
-versione stabile pubblicata, cioè il tag `FIREFOX-ANDROID_<versione>_RELEASE` più recente (oggi **157.0.1**), che è
+versione stabile pubblicata, cioè il tag `FIREFOX-ANDROID_<versione>_RELEASE` più recente (oggi **158.0.1**), che è
 esattamente il codice da cui Mozilla compila Firefox per il Play Store. Il file [`UPSTREAM_BASE`](UPSTREAM_BASE)
 indica il commit di Firefox su cui la patch è stata verificata l'ultima volta.
 
 Per provare un'altra versione basta la variabile `FIREFOX_VERSION`: `beta`, `main` (Nightly) o un tag preciso, ad es.
-`FIREFOX_VERSION=FIREFOX-ANDROID_157_0_RELEASE chrome-tabstrip/scripts/fetch-firefox.sh ~/firefox`.
+`FIREFOX_VERSION=FIREFOX-ANDROID_158_0_RELEASE chrome-tabstrip/scripts/fetch-firefox.sh ~/firefox`.
 
 ## Uso rapido
 
@@ -230,7 +246,8 @@ MOZCONFIG=$PWD/mozconfig-chrome-tabstrip ./mach gradle fenix:testDebugUnitTest \
 Il workflow [`.github/workflows/chrome-tabstrip.yml`](../.github/workflows/chrome-tabstrip.yml):
 
 - **ogni giorno** controlla l'ultima versione stabile di Firefox per Android: se la patch non si applica più, GitHub
-  ti avvisa via e-mail; se si applica e quella versione non è ancora nelle Release, compila l'APK e lo pubblica;
+  ti avvisa via e-mail; se si applica e quella versione non è ancora nelle Release, compila l'APK e lo pubblica
+  insieme a `update.json` (versione, firma e indirizzo dell'APK, letti da Firefox per aggiornarsi);
 - a ogni push che modifica la patch o gli script verifica che la patch si applichi;
 - a mano (**Actions → Chrome-like tab strip → Run workflow**) fa le stesse cose; con *mode = test* compila con una
   chiave temporanea e allega l'APK all'esecuzione invece di pubblicarlo (utile per provare una versione diversa
@@ -254,17 +271,19 @@ File nuovi (`mobile/android/fenix/app/src/...`):
   finestra (al posto di `DesktopModeMiddleware`) e aggiorna le schede aperte quando cambia;
   `AdaptiveDesktopModeRepository.kt` salva la preferenza per schermo grande e piccolo e le schede con una versione
   scelta dal menu.
+- `selfupdate/SelfUpdater.kt` — gli aggiornamenti dall'app, dalle Release di GitHub; `res/values/` e
+  `res/values-it/self_update_strings.xml` — i testi delle finestre.
 - `test/.../browser/tabstrip/AdaptiveTabStripTest.kt`, `ImmersiveTabStripTest.kt`, `TabStripModeToggleTest.kt`,
-  `test/.../browser/desktopmode/AdaptiveDesktopModeMiddlewareTest.kt`, `AdaptiveDesktopModeRepositoryTest.kt` — test
-  unitari.
+  `test/.../browser/desktopmode/AdaptiveDesktopModeMiddlewareTest.kt`, `AdaptiveDesktopModeRepositoryTest.kt`,
+  `test/.../selfupdate/SelfUpdaterTest.kt` — test unitari.
 
 Modifiche piccole ai file esistenti:
 
 - `utils/Settings.kt` — `isTabStripEnabled` = preferenza utente (`isTabStripPreferenceEnabled`) **e** finestra
   abbastanza grande; rimosso il blocco per i pieghevoli.
 - `HomeActivity.kt` — aggiorna `AdaptiveTabStrip` in `onCreate` e in `onConfigurationChanged` (prima dei fragment)
-  e ricostruisce l'interfaccia se la barra degli indirizzi deve cambiare posizione; avvia e aggiorna
-  `ImmersiveTabStrip`.
+  e ricostruisce l'interfaccia quando la strip compare/scompare con la barra degli indirizzi o la strip in basso;
+  avvia e aggiorna `ImmersiveTabStrip`; avvia `SelfUpdater`.
 - `BrowserToolbarComposable.kt`, `HomeToolbarComposable.kt` — ricalcolano la visibilità della strip quando cambia
   la finestra e la mostrano/nascondono con un'animazione.
 - `components/toolbar/BrowserToolbarMiddleware.kt`, `home/toolbar/BrowserToolbarMiddleware.kt` — ricostruiscono i
@@ -272,7 +291,8 @@ Modifiche piccole ai file esistenti:
 - `StatusBarColorManager.kt`, `TabStripStatusBarView.kt` — il gradiente della status bar segue la strip.
 - `components/Core.kt` — usa `AdaptiveDesktopModeMiddleware`; `SiteSettingsFragment.kt` — l'interruttore «Richiedi
   sempre sito desktop» si aggiorna se si apre/chiude il telefono con la schermata aperta.
-- `CustomizationFragment.kt` — l'interruttore nelle impostazioni usa la preferenza utente.
+- `CustomizationFragment.kt` — l'interruttore e la posizione della strip nelle impostazioni usano la preferenza
+  utente.
 - `TabStrip.kt` (usa `ChromeStyleTabStripContent`), `TabStripState.kt` (stato di caricamento), `dimens.xml`
   (altezza 40dp), `StatusBarColorManagerTest.kt` (adeguato alle modifiche).
 

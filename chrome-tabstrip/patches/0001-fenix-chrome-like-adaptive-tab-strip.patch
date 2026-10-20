@@ -1,8 +1,8 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
-index 4364da68986..8e68d0e937a 100644
+index daf3317d..78266119 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
-@@ -113,6 +113,8 @@ import org.mozilla.fenix.browser.BrowserFragment
+@@ -114,6 +114,8 @@ import org.mozilla.fenix.browser.BrowserFragmentDirections
  import org.mozilla.fenix.browser.browsingmode.BrowsingMode
  import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
  import org.mozilla.fenix.browser.browsingmode.DefaultBrowsingModeManager
@@ -11,7 +11,15 @@ index 4364da68986..8e68d0e937a 100644
  import org.mozilla.fenix.components.DefaultHomepageAsANewTabPreferenceRepository
  import org.mozilla.fenix.components.DefaultShortcutManagerCompatWrapper
  import org.mozilla.fenix.components.accounts.FenixFxAEntryPoint
-@@ -408,6 +410,11 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -187,6 +189,7 @@ import org.mozilla.fenix.perf.StartupPathProvider
+ import org.mozilla.fenix.perf.StartupTimeline
+ import org.mozilla.fenix.perf.StartupTypeTelemetry
+ import org.mozilla.fenix.privacyreport.PrivacyReportNotificationScheduler
++import org.mozilla.fenix.selfupdate.SelfUpdater
+ import org.mozilla.fenix.session.PrivateNotificationService
+ import org.mozilla.fenix.settings.SupportUtils
+ import org.mozilla.fenix.shortcut.NewTabShortcutIntentProcessor.Companion.ACTION_OPEN_PRIVATE_TAB
+@@ -413,6 +416,11 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
          )
      }
  
@@ -23,7 +31,7 @@ index 4364da68986..8e68d0e937a 100644
      // See onKeyDown for why this is necessary
      private var backLongPressJob: Job? = null
  
-@@ -472,6 +479,9 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -477,6 +485,9 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
              browsingModeManager = createBrowsingModeManager(intent)
              setupTheme()
  
@@ -33,39 +41,46 @@ index 4364da68986..8e68d0e937a 100644
              super.onCreate(savedInstanceState)
          }
  
-@@ -480,6 +490,11 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -485,6 +496,12 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
          // the `setContent` starts attaching fragments.
          EdgeToEdgeFragmentLifecycleCallbacks.register(supportFragmentManager, window)
  
-+        // Custom tabs never show the tab strip.
++        // Custom tabs never show the tab strip, nor look for updates.
 +        if (this !is ExternalAppBrowserActivity) {
 +            immersiveTabStrip.start(supportFragmentManager)
++            SelfUpdater(this).start()
 +        }
 +
          // Checks if Activity is currently in PiP mode if launched from external intents, then exits it
          checkAndExitPiP()
  
-@@ -1016,6 +1031,12 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -1023,6 +1040,12 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
      }
  
      final override fun onConfigurationChanged(newConfig: Configuration) {
 +        // Update the tab strip visibility (e.g. a foldable was folded / unfolded) before the fragments are notified,
 +        // so they lay themselves out with the new toolbar height.
-+        val previousToolbarPosition = components.settings.toolbarPosition
++        val wasTabStripShown = components.settings.isTabStripEnabled
 +        AdaptiveTabStrip.onWindowChanged(this, newConfig)
 +        immersiveTabStrip.update()
 +
          super.onConfigurationChanged(newConfig)
  
          // Diagnostic breadcrumb for "Display already aquired" crash:
-@@ -1025,6 +1046,12 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -1032,6 +1055,18 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
          components.appStore.dispatch(
              AppAction.OrientationChange(orientation = OrientationMode.fromInteger(newConfig.orientation))
          )
 +
-+        // The tab strip always comes with the toolbar at the top. When showing / hiding it also moves a bottom
-+        // toolbar, rebuild the UI, like Chrome does when a foldable switches between phone and tablet layouts.
-+        if (components.settings.toolbarPosition != previousToolbarPosition) {
++        // Only a tab strip at the top above a top toolbar appears / disappears in place. With a bottom toolbar or a
++        // bottom tab strip, rebuild the UI, like Chrome does when a foldable switches between phone and tablet layouts.
++        // Custom tabs never show the tab strip.
++        val settings = components.settings
++        if (
++            this !is ExternalAppBrowserActivity &&
++                settings.isTabStripEnabled != wasTabStripShown &&
++                (settings.shouldUseBottomToolbar || settings.shouldUseBottomTabStrip)
++        ) {
 +            recreate()
 +        }
      }
@@ -73,7 +88,7 @@ index 4364da68986..8e68d0e937a 100644
      final override fun recreate() {
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeMiddleware.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeMiddleware.kt
 new file mode 100644
-index 00000000000..5e2b6a44746
+index 00000000..5e2b6a44
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeMiddleware.kt
 @@ -0,0 +1,211 @@
@@ -290,7 +305,7 @@ index 00000000000..5e2b6a44746
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeRepository.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeRepository.kt
 new file mode 100644
-index 00000000000..6b48260d6cc
+index 00000000..6b48260d
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeRepository.kt
 @@ -0,0 +1,89 @@
@@ -385,7 +400,7 @@ index 00000000000..6b48260d6cc
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStrip.kt
 new file mode 100644
-index 00000000000..e4b7639c80b
+index 00000000..e4b7639c
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStrip.kt
 @@ -0,0 +1,114 @@
@@ -505,7 +520,7 @@ index 00000000000..e4b7639c80b
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
 new file mode 100644
-index 00000000000..63262feabe8
+index 00000000..63262fea
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
 @@ -0,0 +1,724 @@
@@ -1235,7 +1250,7 @@ index 00000000000..63262feabe8
 +        }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ImmersiveTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ImmersiveTabStrip.kt
 new file mode 100644
-index 00000000000..706a42c2f32
+index 00000000..706a42c2
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ImmersiveTabStrip.kt
 @@ -0,0 +1,200 @@
@@ -1440,22 +1455,22 @@ index 00000000000..706a42c2f32
 +    }
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
-index 85c26242201..1538c6aead5 100644
+index 8155be98..91f7571e 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
-@@ -151,8 +151,9 @@ fun TabStrip(
-     }
-         .collectAsState(initial = TabStripState.initial)
- 
--    TabStripContent(
-+    ChromeStyleTabStripContent(
-         state = state,
-+        modeToggle = rememberTabStripModeToggle(browserStore, state.isPrivateMode),
-         showTabCounterButton = showTabCounterButton,
-         colors = tabStripColors,
-         onAddTabClick = {
+@@ -182,8 +182,9 @@ fun TabStrip(
+                 animationSpec = tween(durationMillis = TAB_STRIP_VISIBILITY_ANIMATION_MS),
+             ),
+     ) {
+-        TabStripContent(
++        ChromeStyleTabStripContent(
+             state = state,
++            modeToggle = rememberTabStripModeToggle(browserStore, state.isPrivateMode),
+             showTabCounterButton = showTabCounterButton,
+             colors = tabStripColors,
+             onAddTabClick = createAddTabClickHandler(onAddTabClick),
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripState.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripState.kt
-index b57f3a1f225..c92339911e0 100644
+index b57f3a1f..c9233991 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripState.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripState.kt
 @@ -48,6 +48,7 @@ data class TabStripState(
@@ -1482,7 +1497,7 @@ index b57f3a1f225..c92339911e0 100644
      )
  }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Core.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Core.kt
-index 45a68358d15..b95613e1254 100644
+index 13f9f616..a2a3b71e 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Core.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Core.kt
 @@ -118,8 +118,8 @@ import org.mozilla.fenix.Config
@@ -1496,7 +1511,7 @@ index 45a68358d15..b95613e1254 100644
  import org.mozilla.fenix.components.search.ApplicationSearchMiddleware
  import org.mozilla.fenix.components.search.SearchMigration
  import org.mozilla.fenix.components.search.SearchWidgetMiddleware
-@@ -153,6 +153,7 @@ import org.mozilla.fenix.telemetry.TelemetryMiddleware
+@@ -152,6 +152,7 @@ import org.mozilla.fenix.telemetry.TelemetryMiddleware
  import org.mozilla.fenix.translations.TranslationsEnabledSettings
  import org.mozilla.fenix.utils.Settings.DeleteDownloadBehavior
  import org.mozilla.fenix.utils.getUndoDelay
@@ -1504,7 +1519,7 @@ index 45a68358d15..b95613e1254 100644
  import org.mozilla.geckoview.GeckoRuntime
  
  internal val ADDITIONAL_BUNDLED_SEARCH_ENGINE_IDS = listOf("reddit", "youtube")
-@@ -382,7 +383,11 @@ class Core(
+@@ -381,7 +382,11 @@ class Core(
                  SaveToPDFMiddleware(context),
                  FxSuggestFactsMiddleware(),
                  FileUploadsDirCleanerMiddleware(fileUploadsDirCleaner),
@@ -1518,7 +1533,7 @@ index 45a68358d15..b95613e1254 100644
                  SearchWidgetMiddleware(context),
                  // We are disabling automatically initializing translations so that we can control when
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
-index b19a37d5512..c458ea75998 100644
+index c00185e5..7f138b48 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
 @@ -9,6 +9,7 @@ import android.view.View
@@ -1526,10 +1541,10 @@ index b19a37d5512..c458ea75998 100644
  import androidx.annotation.VisibleForTesting
  import androidx.appcompat.app.AppCompatActivity
 +import androidx.compose.animation.AnimatedVisibility
+ import androidx.compose.foundation.background
+ import androidx.compose.foundation.layout.Box
  import androidx.compose.foundation.layout.Column
- import androidx.compose.foundation.layout.fillMaxWidth
- import androidx.compose.foundation.layout.wrapContentHeight
-@@ -48,6 +49,7 @@ import mozilla.components.ui.widgets.behavior.DependencyGravity
+@@ -50,6 +51,7 @@ import mozilla.components.ui.widgets.behavior.DependencyGravity
  import mozilla.components.ui.widgets.behavior.EngineViewScrollingBehavior
  import mozilla.components.ui.widgets.behavior.EngineViewScrollingBehaviorFactory
  import org.mozilla.fenix.browser.store.BrowserScreenStore
@@ -1537,38 +1552,31 @@ index b19a37d5512..c458ea75998 100644
  import org.mozilla.fenix.components.AppStore
  import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchEnded
  import org.mozilla.fenix.components.toolbar.ToolbarPosition.BOTTOM
-@@ -98,7 +100,9 @@ class BrowserToolbarComposable(
+@@ -102,7 +104,9 @@ class BrowserToolbarComposable(
      val layout: View =
          ScrollableToolbarComposeView(activity, this) {
                  val isSearching = toolbarStore.observeAsComposableState { it.isEditMode() }.value
--                val shouldShowTabStrip: Boolean = remember { shouldShowTabStrip() }
+-                val shouldShowTabStripAtTop = remember {
 +                // Recompose when the window changes (e.g. a foldable is folded / unfolded) to show / hide the tab strip.
 +                val isTabStripAllowed = AdaptiveTabStrip.isTabStripAllowed
-+                val shouldShowTabStrip: Boolean = remember(isTabStripAllowed) { shouldShowTabStrip() }
-                 val customColors = browserScreenStore.observeAsComposableState { it.customTabColors }
-                 val shouldUseBottomToolbar = remember(settings) { settings.shouldUseBottomToolbar }
- 
-@@ -146,10 +150,13 @@ class BrowserToolbarComposable(
-                         }
- 
-                     MaterialTheme(colorScheme = colorScheme) {
--                        when (shouldShowTabStrip) {
-+                        // A top toolbar stays in place while the tab strip appears / disappears with the window.
-+                        when (shouldShowTabStrip || !shouldUseBottomToolbar) {
++                val shouldShowTabStripAtTop = remember(isTabStripAllowed) {
+                     customTabSession == null && settings.shouldShowTabStripAtTop
+                 }
+                 val shouldShowTabStripAtBottom = remember {
+@@ -161,7 +165,7 @@ class BrowserToolbarComposable(
+                         when (!shouldUseBottomToolbar) {
                              true ->
                                  Column(modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
--                                    tabStripContent()
-+                                    AnimatedVisibility(visible = shouldShowTabStrip) {
-+                                        tabStripContent()
-+                                    }
+-                                    if (shouldShowTabStripAtTop) {
++                                    AnimatedVisibility(visible = shouldShowTabStripAtTop) {
+                                         tabStripContent()
+                                     }
                                      BrowserToolbar(
-                                         store = toolbarStore,
-                                         cfr = toolbarCFR,
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarMiddleware.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarMiddleware.kt
-index c1ff8ae52b6..70c5d242495 100644
+index a972634b..260eb501 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarMiddleware.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarMiddleware.kt
-@@ -13,6 +13,8 @@ import kotlinx.coroutines.CoroutineScope
+@@ -14,6 +14,8 @@ import kotlinx.coroutines.CoroutineScope
  import kotlinx.coroutines.Dispatchers
  import kotlinx.coroutines.Job
  import kotlinx.coroutines.flow.Flow
@@ -1577,7 +1585,7 @@ index c1ff8ae52b6..70c5d242495 100644
  import kotlinx.coroutines.flow.distinctUntilChangedBy
  import kotlinx.coroutines.flow.first
  import kotlinx.coroutines.launch
-@@ -102,6 +104,7 @@ import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
+@@ -103,6 +105,7 @@ import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
  import org.mozilla.fenix.browser.readermode.ReaderModeController
  import org.mozilla.fenix.browser.store.BrowserScreenAction
  import org.mozilla.fenix.browser.store.BrowserScreenStore
@@ -1585,7 +1593,7 @@ index c1ff8ae52b6..70c5d242495 100644
  import org.mozilla.fenix.components.AppStore
  import org.mozilla.fenix.components.NimbusComponents
  import org.mozilla.fenix.components.UseCases
-@@ -951,7 +954,10 @@ class BrowserToolbarMiddleware(
+@@ -959,7 +962,10 @@ class BrowserToolbarMiddleware(
  
      private fun observeOrientationChanges(store: Store<BrowserToolbarState, BrowserToolbarAction>) {
          appStore.observeWhileActive {
@@ -1598,7 +1606,7 @@ index c1ff8ae52b6..70c5d242495 100644
                      updateStartBrowserActions(store)
                      updateEndBrowserActions(store)
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/BrowserToolbarMiddleware.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/BrowserToolbarMiddleware.kt
-index 3a7e1899905..9f4ec732d6a 100644
+index dfc0cb4c..21868403 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/BrowserToolbarMiddleware.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/BrowserToolbarMiddleware.kt
 @@ -15,6 +15,8 @@ import kotlinx.coroutines.CoroutineScope
@@ -1631,10 +1639,10 @@ index 3a7e1899905..9f4ec732d6a 100644
                      updateStartBrowserActions(store)
                      updateEndBrowserActions(store)
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
-index c95bb50f2f4..1a6e13ac250 100644
+index 1925b435..c1741b4e 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
-@@ -44,6 +44,7 @@ import mozilla.components.compose.browser.toolbar.ui.BrowserToolbarQuery
+@@ -45,6 +45,7 @@ import mozilla.components.compose.browser.toolbar.ui.BrowserToolbarQuery
  import mozilla.components.lib.state.ext.observeAsComposableState
  import org.mozilla.fenix.R
  import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
@@ -1642,31 +1650,426 @@ index c95bb50f2f4..1a6e13ac250 100644
  import org.mozilla.fenix.components.AppStore
  import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchEnded
  import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchStarted
-@@ -147,7 +148,9 @@ internal class HomeToolbarComposable(
- 
+@@ -148,7 +149,9 @@ internal class HomeToolbarComposable(
      @Composable
      private fun ToolbarContent(wallpaperTextColor: Color?) {
--        val shouldShowTabStrip: Boolean = remember { settings.isTabStripEnabled }
+         val shouldUseBottomToolbar = remember { settings.shouldUseBottomToolbar }
+-        val shouldShowTabStrip = remember {
 +        // Recompose when the window changes (e.g. a foldable is folded / unfolded) to show / hide the tab strip.
 +        val isTabStripAllowed = AdaptiveTabStrip.isTabStripAllowed
-+        val shouldShowTabStrip: Boolean = remember(isTabStripAllowed) { settings.isTabStripEnabled }
-         val isAddressBarVisible = remember { addressBarVisibility }
++        val shouldShowTabStrip = remember(isTabStripAllowed) {
+             if (shouldUseBottomToolbar) {
+                 settings.shouldShowTabStripAtBottom
+             } else {
+@@ -167,7 +170,7 @@ internal class HomeToolbarComposable(
+                 searchSuggestionsContent(Modifier.weight(1f))
+             }
  
-         Column(
-@@ -157,7 +160,7 @@ internal class HomeToolbarComposable(
-                     testTag = context.resources.getResourceName(R.id.composable_toolbar)
-                 }
-         ) {
 -            if (shouldShowTabStrip) {
 +            AnimatedVisibility(visible = shouldShowTabStrip) {
                  tabStripContent()
              }
  
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt
+new file mode 100644
+index 00000000..6a623eec
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt
+@@ -0,0 +1,389 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.selfupdate
++
++import android.content.ActivityNotFoundException
++import android.content.Context
++import android.content.Intent
++import android.content.pm.PackageInfo
++import android.content.pm.PackageManager
++import android.os.Build.VERSION.SDK_INT
++import android.os.Build.VERSION_CODES
++import android.widget.FrameLayout
++import android.widget.ProgressBar
++import android.widget.Toast
++import androidx.annotation.VisibleForTesting
++import androidx.appcompat.app.AppCompatActivity
++import androidx.core.content.FileProvider
++import androidx.core.content.edit
++import androidx.core.content.pm.PackageInfoCompat
++import androidx.lifecycle.DefaultLifecycleObserver
++import androidx.lifecycle.LifecycleOwner
++import androidx.lifecycle.lifecycleScope
++import androidx.lifecycle.withResumed
++import com.google.android.material.dialog.MaterialAlertDialogBuilder
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.currentCoroutineContext
++import kotlinx.coroutines.ensureActive
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.withContext
++import mozilla.components.support.base.log.logger.Logger
++import org.json.JSONException
++import org.json.JSONObject
++import org.mozilla.fenix.R
++import java.io.File
++import java.io.IOException
++import java.net.HttpURLConnection
++import java.net.URL
++
++/**
++ * Where the GitHub Releases of the patch publish the description of the latest release (see [SelfUpdateInfo]). A fork
++ * publishing its own releases must change it: builds signed with another key are never offered these updates anyway.
++ */
++private const val UPDATE_INFO_URL =
++    "https://github.com/Waph1/firefox-android-tab_strip/releases/latest/download/update.json"
++
++private const val CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000L
++private const val TIMEOUT_MS = 30_000
++private const val BUFFER_SIZE = 64 * 1024
++private const val MAX_UPDATE_INFO_LENGTH = 16 * 1024
++private const val PERCENT = 100
++private const val DIALOG_PADDING_DP = 24
++
++private const val PREFERENCES_NAME = "chrome_tabstrip_self_update"
++private const val PREF_LAST_CHECK = "last_check"
++
++// In the cache directory, which the app file provider shares (see res/xml/file_paths.xml).
++private const val UPDATE_DIRECTORY = "self-update"
++private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
++
++/**
++ * Description of the latest release, read from the `update.json` file published with its APK.
++ *
++ * @property packageName The package name of the published app.
++ * @property versionName The version shown to the user, e.g. "158.0.1".
++ * @property versionCode The Android version code of the published APK.
++ * @property apkUrl Where to download the APK from.
++ * @property signingCertSha256 The SHA-256 digest of the certificate the APK is signed with, in lowercase hexadecimal.
++ */
++data class SelfUpdateInfo(
++    val packageName: String,
++    val versionName: String,
++    val versionCode: Long,
++    val apkUrl: String,
++    val signingCertSha256: String,
++) {
++    /**
++     * Whether this release updates the installed app: same app, newer and signed with the same key, so that Android
++     * installs it on top of the installed one.
++     *
++     * @param installedPackageName The package name of the installed app.
++     * @param installedVersionCode The version code of the installed app.
++     * @param isInstalledAppSignedWith Whether the installed app is signed with the certificate of the given digest.
++     */
++    fun isUpdateFor(
++        installedPackageName: String,
++        installedVersionCode: Long,
++        isInstalledAppSignedWith: (ByteArray) -> Boolean,
++    ) = packageName == installedPackageName &&
++        versionCode > installedVersionCode &&
++        isInstalledAppSignedWith(signingCertSha256.chunked(2).map { it.toInt(HEX_RADIX).toByte() }.toByteArray())
++
++    companion object {
++        private const val HEX_RADIX = 16
++        private val SHA256_HEX = Regex("[0-9a-f]{64}")
++
++        /**
++         * Parses the content of `update.json`, or returns `null` if it isn't valid.
++         */
++        fun fromJson(json: String): SelfUpdateInfo? =
++            try {
++                val info = JSONObject(json)
++                val apkUrl = info.getString("apkUrl")
++                val certificate = info.getString("signingCertSha256").lowercase()
++                if (!apkUrl.startsWith("https://") || !certificate.matches(SHA256_HEX)) {
++                    null
++                } else {
++                    SelfUpdateInfo(
++                        packageName = info.getString("packageName"),
++                        versionName = info.getString("versionName"),
++                        versionCode = info.getLong("versionCode"),
++                        apkUrl = apkUrl,
++                        signingCertSha256 = certificate,
++                    )
++                }
++            } catch (e: JSONException) {
++                null
++            }
++    }
++}
++
++/**
++ * Returns the version to show to the user: the Firefox version without the suffix of the build (e.g. "158.0.1" for
++ * "158.0.1-default").
++ */
++@VisibleForTesting
++internal fun displayVersion(versionName: String) = versionName.substringBefore('-')
++
++/**
++ * Whether it's time to look for an update again.
++ *
++ * @param lastCheck When the last check was done, in milliseconds.
++ * @param now The current time, in milliseconds.
++ */
++@VisibleForTesting
++internal fun isCheckDue(
++    lastCheck: Long,
++    now: Long,
++) = now - lastCheck >= CHECK_INTERVAL_MS || now < lastCheck
++
++/**
++ * Lets this build of Firefox (with the Chrome-like tab strip, published in the GitHub Releases of the repository of
++ * the patch) update itself, like apps installed from outside the Play Store usually do.
++ *
++ * At most once a day, when the app comes to the foreground, it reads the description of the latest release (see
++ * [SelfUpdateInfo]). If that release is newer than the installed app and signed with the same key, it asks whether to
++ * update: the APK is then downloaded and handed over to the Android package installer, which asks for a last
++ * confirmation (and, the first time, to allow Firefox to install apps).
++ *
++ * Builds that can't be updated from the releases (local builds signed with another key, other variants like Nightly or
++ * debug) are never offered an update.
++ *
++ * @param activity The activity showing the dialogs.
++ * @param updateInfoUrl Where to read the description of the latest release.
++ * @param clock Returns the current time in milliseconds.
++ */
++class SelfUpdater(
++    private val activity: AppCompatActivity,
++    private val updateInfoUrl: String = UPDATE_INFO_URL,
++    private val clock: () -> Long = System::currentTimeMillis,
++) : DefaultLifecycleObserver {
++    private val logger = Logger("SelfUpdater")
++    private val preferences = activity.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
++    private var job: Job? = null
++
++    /** Starts looking for updates every time [activity] is resumed, at most once a day. */
++    fun start() {
++        activity.lifecycle.addObserver(this)
++    }
++
++    override fun onResume(owner: LifecycleOwner) {
++        if (job?.isActive == true || !isCheckDue(preferences.getLong(PREF_LAST_CHECK, 0L), clock())) return
++
++        job =
++            activity.lifecycleScope.launch {
++                val update =
++                    withContext(Dispatchers.IO) {
++                        // Drop the APK of a previous update, installed or not.
++                        File(activity.cacheDir, UPDATE_DIRECTORY).deleteRecursively()
++                        val json =
++                            try {
++                                readText(updateInfoUrl)
++                            } catch (e: IOException) {
++                                // Offline or GitHub unreachable: try again the next time the app is resumed.
++                                logger.info("Can't check for updates", e)
++                                return@withContext null
++                            }
++                        preferences.edit { putLong(PREF_LAST_CHECK, clock()) }
++                        json?.let { SelfUpdateInfo.fromJson(it) }?.takeIf { isUpdate(it) }
++                    }
++                if (update != null) {
++                    activity.withResumed { askToUpdate(update) }
++                }
++            }
++    }
++
++    private fun isUpdate(update: SelfUpdateInfo): Boolean {
++        val packageManager = activity.packageManager
++        val installed = installedPackageInfo() ?: return false
++        return update.isUpdateFor(
++            installedPackageName = activity.packageName,
++            installedVersionCode = PackageInfoCompat.getLongVersionCode(installed),
++        ) { certificate ->
++            PackageInfoCompat.hasSignatures(
++                packageManager,
++                activity.packageName,
++                mapOf(certificate to PackageManager.CERT_INPUT_SHA256),
++                false,
++            )
++        }
++    }
++
++    private fun installedPackageInfo(): PackageInfo? =
++        try {
++            if (SDK_INT >= VERSION_CODES.TIRAMISU) {
++                activity.packageManager.getPackageInfo(activity.packageName, PackageManager.PackageInfoFlags.of(0))
++            } else {
++                @Suppress("DEPRECATION")
++                activity.packageManager.getPackageInfo(activity.packageName, 0)
++            }
++        } catch (e: PackageManager.NameNotFoundException) {
++            null
++        }
++
++    private fun askToUpdate(update: SelfUpdateInfo) {
++        MaterialAlertDialogBuilder(activity)
++            .setTitle(R.string.self_update_available_title)
++            .setMessage(
++                activity.getString(
++                    R.string.self_update_available_message,
++                    activity.getString(R.string.app_name),
++                    displayVersion(update.versionName),
++                    displayVersion(installedPackageInfo()?.versionName.orEmpty()),
++                ),
++            )
++            .setPositiveButton(R.string.self_update_update) { _, _ -> downloadAndInstall(update) }
++            .setNegativeButton(R.string.self_update_later, null)
++            .show()
++    }
++
++    private fun downloadAndInstall(update: SelfUpdateInfo) {
++        val progressBar =
++            ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply {
++                isIndeterminate = true
++                max = PERCENT
++            }
++        val padding = (DIALOG_PADDING_DP * activity.resources.displayMetrics.density).toInt()
++        val content = FrameLayout(activity).apply {
++            setPadding(padding, padding / 2, padding, 0)
++            addView(progressBar)
++        }
++
++        var download: Job? = null
++        val dialog =
++            MaterialAlertDialogBuilder(activity)
++                .setTitle(R.string.self_update_downloading)
++                .setView(content)
++                .setCancelable(false)
++                .setNegativeButton(android.R.string.cancel) { _, _ -> download?.cancel() }
++                .show()
++
++        val apk = File(File(activity.cacheDir, UPDATE_DIRECTORY), "firefox-${displayVersion(update.versionName)}.apk")
++        val job =
++            activity.lifecycleScope.launch {
++                val isDownloaded =
++                    withContext(Dispatchers.IO) {
++                        try {
++                            downloadFile(update.apkUrl, apk) { percent ->
++                                activity.runOnUiThread {
++                                    progressBar.isIndeterminate = false
++                                    progressBar.progress = percent
++                                }
++                            }
++                            isExpectedApk(apk, update)
++                        } catch (e: IOException) {
++                            logger.warn("Can't download the update", e)
++                            false
++                        }
++                    }
++                dialog.dismiss()
++                if (isDownloaded) {
++                    // The package installer can only be opened while the app is visible.
++                    activity.withResumed { install(apk) }
++                } else {
++                    apk.delete()
++                    Toast.makeText(activity, R.string.self_update_failed, Toast.LENGTH_LONG).show()
++                }
++            }
++        download = job
++        job.invokeOnCompletion { cause ->
++            // Cancelled by the user, or the activity was destroyed.
++            if (cause != null) {
++                dialog.dismiss()
++                apk.delete()
++            }
++        }
++    }
++
++    /** Whether [apk] is the complete APK described by [update]. */
++    private fun isExpectedApk(
++        apk: File,
++        update: SelfUpdateInfo,
++    ): Boolean {
++        val info =
++            if (SDK_INT >= VERSION_CODES.TIRAMISU) {
++                activity.packageManager.getPackageArchiveInfo(apk.path, PackageManager.PackageInfoFlags.of(0))
++            } else {
++                @Suppress("DEPRECATION")
++                activity.packageManager.getPackageArchiveInfo(apk.path, 0)
++            }
++        return info != null &&
++            info.packageName == update.packageName &&
++            PackageInfoCompat.getLongVersionCode(info) == update.versionCode
++    }
++
++    private fun install(apk: File) {
++        val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", apk)
++        val intent =
++            Intent(Intent.ACTION_VIEW)
++                .setDataAndType(uri, APK_MIME_TYPE)
++                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
++        try {
++            activity.startActivity(intent)
++        } catch (e: ActivityNotFoundException) {
++            logger.warn("No package installer", e)
++            Toast.makeText(activity, R.string.self_update_failed, Toast.LENGTH_LONG).show()
++        }
++    }
++
++    private fun openConnection(url: String) =
++        (URL(url).openConnection() as HttpURLConnection).apply {
++            connectTimeout = TIMEOUT_MS
++            readTimeout = TIMEOUT_MS
++            // GitHub redirects the download links to its storage.
++            instanceFollowRedirects = true
++        }
++
++    /** Returns the content of [url], or `null` if there is none (e.g. a release without `update.json`). */
++    private fun readText(url: String): String? {
++        val connection = openConnection(url)
++        try {
++            if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
++            val text = connection.inputStream.bufferedReader().use { it.readText() }
++            return text.takeIf { it.length <= MAX_UPDATE_INFO_LENGTH }
++        } finally {
++            connection.disconnect()
++        }
++    }
++
++    private suspend fun downloadFile(
++        url: String,
++        file: File,
++        onProgress: (percent: Int) -> Unit,
++    ) {
++        val connection = openConnection(url)
++        try {
++            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
++                throw IOException("HTTP ${connection.responseCode}")
++            }
++            val length = connection.contentLengthLong
++            file.parentFile?.mkdirs()
++            connection.inputStream.use { input ->
++                file.outputStream().use { output ->
++                    val buffer = ByteArray(BUFFER_SIZE)
++                    var downloaded = 0L
++                    var lastPercent = -1
++                    while (true) {
++                        currentCoroutineContext().ensureActive()
++                        val read = input.read(buffer)
++                        if (read < 0) break
++                        output.write(buffer, 0, read)
++                        downloaded += read
++                        if (length > 0) {
++                            val percent = (downloaded * PERCENT / length).toInt()
++                            if (percent != lastPercent) {
++                                lastPercent = percent
++                                onProgress(percent)
++                            }
++                        }
++                    }
++                }
++            }
++        } finally {
++            connection.disconnect()
++        }
++    }
++}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
-index 8eaf185575f..4f2896cc81d 100644
+index 1956c4ef..6e10cbf3 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
-@@ -320,12 +320,12 @@ class CustomizationFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFrag
+@@ -304,11 +304,11 @@ class CustomizationFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFrag
          val tabStripSwitch = requirePreference<SwitchPreferenceCompat>(R.string.pref_key_tab_strip_show)
          val context = requireContext()
  
@@ -1676,14 +2079,22 @@ index 8eaf185575f..4f2896cc81d 100644
          tabStripSwitch.setOnPreferenceChangeListener { _, newValue ->
              val enabled = newValue as Boolean
 -            context.components.settings.isTabStripEnabled = enabled
--            updateToolbarCategoryBasedOnTabStrip(enabled)
 +            context.components.settings.isTabStripPreferenceEnabled = enabled
-+            updateToolbarCategoryBasedOnTabStrip(context.components.settings.isTabStripEnabled)
              setupToolbarLayout()
+             setupTabStripLocationCategory()
              updateToolbarShortcut()
-             true
+@@ -318,7 +318,8 @@ class CustomizationFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFrag
+ 
+     private fun setupTabStripLocationCategory() {
+         val settings = requireComponents.settings
+-        val isTabStripEnabled = settings.isTabStripEnabled
++        // Also on the screens too small for the tab strip (e.g. the cover screen of a folded foldable).
++        val isTabStripEnabled = settings.isTabStripPreferenceEnabled
+ 
+         requirePreference<PreferenceCategory>(R.string.pref_key_tab_strip_location).isVisible = isTabStripEnabled
+         if (!isTabStripEnabled) return
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/sitepermissions/SiteSettingsFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/sitepermissions/SiteSettingsFragment.kt
-index f3db19efd63..6f90b362113 100644
+index f3db19ef..6f90b362 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/sitepermissions/SiteSettingsFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/sitepermissions/SiteSettingsFragment.kt
 @@ -5,6 +5,7 @@
@@ -1725,24 +2136,25 @@ index f3db19efd63..6f90b362113 100644
          super.onResume()
          showToolbar(getString(R.string.preferences_site_settings))
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt
-index 605e14db948..83b5e11b53f 100644
+index dbcf87fe..c21c151a 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/StatusBarColorManager.kt
-@@ -70,8 +70,10 @@ class StatusBarColorManager(
-         wallpaperScope = null
+@@ -71,8 +71,11 @@ class StatusBarColorManager(
  
          when {
--            // Don't show the gradient if tab strip is not enabled or private mode is enabled.
--            !settings.isTabStripEnabled || themeManager.currentTheme.isPrivate -> {
-+            // Don't show the gradient if tab strip is not enabled or private mode is enabled. Whether the window
-+            // is currently large enough for the tab strip is handled by [TabStripStatusBarView] itself, so that
-+            // it follows folding / unfolding.
-+            !settings.isTabStripPreferenceEnabled || themeManager.currentTheme.isPrivate -> {
+             // Don't show the status bar gradient if tab strip is not enabled, shown at the bottom
+-            // or private mode is enabled.
+-            !settings.isTabStripEnabled || settings.shouldUseBottomTabStrip || themeManager.currentTheme.isPrivate -> {
++            // or private mode is enabled. Whether the window is currently large enough for the tab strip
++            // is handled by [TabStripStatusBarView] itself, so that it follows folding / unfolding.
++            !settings.isTabStripPreferenceEnabled ||
++                settings.shouldUseBottomTabStrip ||
++                themeManager.currentTheme.isPrivate -> {
                  tabStripStatusBarView.hide()
              }
  
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/TabStripStatusBarView.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/TabStripStatusBarView.kt
-index 22f6ecba25f..cb2a5652898 100644
+index 22f6ecba..cb2a5652 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/TabStripStatusBarView.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/theme/TabStripStatusBarView.kt
 @@ -20,6 +20,7 @@ import androidx.compose.ui.platform.ComposeView
@@ -1778,7 +2190,7 @@ index 22f6ecba25f..cb2a5652898 100644
                  }
              }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
-index 7881995e292..388b977d124 100644
+index 2cda5731..f4d08fe4 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt
 @@ -29,7 +29,6 @@ import mozilla.components.lib.crash.store.CrashReportOption
@@ -1797,7 +2209,7 @@ index 7881995e292..388b977d124 100644
  import org.mozilla.fenix.components.settings.counterPreference
  import org.mozilla.fenix.components.settings.featureFlagBooleanPreference
  import org.mozilla.fenix.components.settings.lazyFeatureFlagBooleanPreference
-@@ -2217,14 +2217,29 @@ class Settings(
+@@ -2237,14 +2237,29 @@ class Settings(
              default = { FxNimbus.features.searchOptimizationOption.value().showSportsCard },
          )
  
@@ -1831,7 +2243,7 @@ index 7881995e292..388b977d124 100644
      var isDynamicToolbarEnabled by
          booleanPreference(
              appContext.getPreferenceKey(R.string.pref_key_dynamic_toolbar),
-@@ -2265,16 +2280,6 @@ class Settings(
+@@ -2285,16 +2300,6 @@ class Settings(
              featureFlag = isAddressFeatureEnabled(appContext),
          )
  
@@ -1848,8 +2260,26 @@ index 7881995e292..388b977d124 100644
      /** Show the Addresses autofill feature. */
      private fun isAddressFeatureEnabled(context: Context): Boolean {
          val locale = LocaleManager.getCurrentLocale(context) ?: LocaleManager.getSystemDefault()
+diff --git a/mobile/android/fenix/app/src/main/res/values-it/self_update_strings.xml b/mobile/android/fenix/app/src/main/res/values-it/self_update_strings.xml
+new file mode 100644
+index 00000000..1da52440
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/res/values-it/self_update_strings.xml
+@@ -0,0 +1,12 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++<resources>
++    <string name="self_update_available_title">Aggiornamento disponibile</string>
++    <string name="self_update_available_message">È disponibile %1$s %2$s con la tab strip in stile Chrome (versione installata: %3$s). Vuoi aggiornare ora?</string>
++    <string name="self_update_update">Aggiorna</string>
++    <string name="self_update_later">Più tardi</string>
++    <string name="self_update_downloading">Scarico l’aggiornamento…</string>
++    <string name="self_update_failed">Non è stato possibile scaricare l’aggiornamento. Riprova più tardi.</string>
++</resources>
 diff --git a/mobile/android/fenix/app/src/main/res/values/dimens.xml b/mobile/android/fenix/app/src/main/res/values/dimens.xml
-index e4d1174f1e4..c0f28d14c80 100644
+index 3e3f13ba..412831d8 100644
 --- a/mobile/android/fenix/app/src/main/res/values/dimens.xml
 +++ b/mobile/android/fenix/app/src/main/res/values/dimens.xml
 @@ -65,7 +65,7 @@
@@ -1859,11 +2289,37 @@ index e4d1174f1e4..c0f28d14c80 100644
 -    <dimen name="tab_strip_height">56dp</dimen>
 +    <dimen name="tab_strip_height">40dp</dimen>
      <dimen name="browser_microsurvey_height">131dp</dimen>
+     <dimen name="tab_groups_strip_height">48dp</dimen>
  
-     <!-- Home Fragment -->
+diff --git a/mobile/android/fenix/app/src/main/res/values/self_update_strings.xml b/mobile/android/fenix/app/src/main/res/values/self_update_strings.xml
+new file mode 100644
+index 00000000..1f0adec8
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/res/values/self_update_strings.xml
+@@ -0,0 +1,20 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++<!-- Updates of the build with the Chrome-like tab strip, from its GitHub Releases. Only translated in Italian. -->
++<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
++    <!-- Title of the dialog shown when a new release is available. -->
++    <string name="self_update_available_title">Update available</string>
++    <!-- Message of the dialog shown when a new release is available. %1$s is the app name, %2$s the new version
++         (e.g. 158.0.1), %3$s the installed version. -->
++    <string name="self_update_available_message">%1$s %2$s with the Chrome-like tab strip is available (installed version: %3$s). Update now?</string>
++    <!-- Button starting the download of the update. -->
++    <string name="self_update_update">Update</string>
++    <!-- Button postponing the update to the next day. -->
++    <string name="self_update_later">Later</string>
++    <!-- Title of the dialog shown while the update is downloaded. -->
++    <string name="self_update_downloading">Downloading the update…</string>
++    <!-- Message shown when the update could not be downloaded or opened. -->
++    <string name="self_update_failed">The update couldn’t be downloaded. Try again later.</string>
++</resources>
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeMiddlewareTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeMiddlewareTest.kt
 new file mode 100644
-index 00000000000..a5d51722b06
+index 00000000..a5d51722
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeMiddlewareTest.kt
 @@ -0,0 +1,381 @@
@@ -2250,7 +2706,7 @@ index 00000000000..a5d51722b06
 +}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeRepositoryTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeRepositoryTest.kt
 new file mode 100644
-index 00000000000..eb979e22f81
+index 00000000..eb979e22
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeRepositoryTest.kt
 @@ -0,0 +1,77 @@
@@ -2333,7 +2789,7 @@ index 00000000000..eb979e22f81
 +}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt
 new file mode 100644
-index 00000000000..bb0917c9e30
+index 00000000..bb0917c9
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt
 @@ -0,0 +1,95 @@
@@ -2434,7 +2890,7 @@ index 00000000000..bb0917c9e30
 +}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/ImmersiveTabStripTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/ImmersiveTabStripTest.kt
 new file mode 100644
-index 00000000000..c7adcd7d1e0
+index 00000000..c7adcd7d
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/ImmersiveTabStripTest.kt
 @@ -0,0 +1,146 @@
@@ -2586,7 +3042,7 @@ index 00000000000..c7adcd7d1e0
 +}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/TabStripModeToggleTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/TabStripModeToggleTest.kt
 new file mode 100644
-index 00000000000..210e7b080a7
+index 00000000..210e7b08
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/TabStripModeToggleTest.kt
 @@ -0,0 +1,67 @@
@@ -2657,8 +3113,115 @@ index 00000000000..210e7b080a7
 +        )
 +    }
 +}
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/selfupdate/SelfUpdaterTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/selfupdate/SelfUpdaterTest.kt
+new file mode 100644
+index 00000000..44a5b3d5
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/selfupdate/SelfUpdaterTest.kt
+@@ -0,0 +1,101 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.selfupdate
++
++import org.junit.Assert.assertArrayEquals
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.robolectric.RobolectricTestRunner
++
++private const val CERTIFICATE = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
++private const val HOUR_MS = 60 * 60 * 1000L
++
++@RunWith(RobolectricTestRunner::class)
++class SelfUpdaterTest {
++    private val update =
++        SelfUpdateInfo(
++            packageName = "org.mozilla.firefox",
++            versionName = "158.0.1",
++            versionCode = 2016000000L,
++            apkUrl = "https://github.com/owner/repo/releases/download/tag/firefox.apk",
++            signingCertSha256 = CERTIFICATE,
++        )
++
++    private fun json(
++        apkUrl: String = update.apkUrl,
++        certificate: String = CERTIFICATE,
++    ) = """
++        {
++          "packageName": "org.mozilla.firefox",
++          "versionName": "158.0.1",
++          "versionCode": 2016000000,
++          "apkUrl": "$apkUrl",
++          "signingCertSha256": "$certificate"
++        }
++    """
++
++    @Test
++    fun `GIVEN a valid update json WHEN parsed THEN the update is returned`() {
++        assertEquals(update, SelfUpdateInfo.fromJson(json()))
++        assertEquals(update, SelfUpdateInfo.fromJson(json(certificate = CERTIFICATE.uppercase())))
++    }
++
++    @Test
++    fun `GIVEN an invalid update json WHEN parsed THEN there is no update`() {
++        assertNull(SelfUpdateInfo.fromJson("Not Found"))
++        assertNull(SelfUpdateInfo.fromJson("""{ "packageName": "org.mozilla.firefox" }"""))
++        assertNull(SelfUpdateInfo.fromJson(json(apkUrl = "http://example.com/firefox.apk")))
++        assertNull(SelfUpdateInfo.fromJson(json(certificate = "0123")))
++    }
++
++    @Test
++    fun `GIVEN a newer release of the same app signed with the same key THEN it is an update`() {
++        var checkedCertificate: ByteArray? = null
++
++        val isUpdate =
++            update.isUpdateFor("org.mozilla.firefox", installedVersionCode = 2015000000L) { certificate ->
++                checkedCertificate = certificate
++                true
++            }
++
++        assertTrue(isUpdate)
++        assertArrayEquals(
++            ByteArray(32) { i -> ((i % 8) * 0x22 + 0x01).toByte() },
++            checkedCertificate,
++        )
++    }
++
++    @Test
++    fun `GIVEN a release that can't be installed on top of the app THEN it is not an update`() {
++        // Same or older version.
++        assertFalse(update.isUpdateFor("org.mozilla.firefox", installedVersionCode = 2016000000L) { true })
++        assertFalse(update.isUpdateFor("org.mozilla.firefox", installedVersionCode = 2017000000L) { true })
++        // Another app, e.g. the Nightly or debug variant.
++        assertFalse(update.isUpdateFor("org.mozilla.fenix", installedVersionCode = 1L) { true })
++        // Signed with another key, e.g. a local build.
++        assertFalse(update.isUpdateFor("org.mozilla.firefox", installedVersionCode = 1L) { false })
++    }
++
++    @Test
++    fun `GIVEN the version name of a build THEN the Firefox version is shown`() {
++        assertEquals("158.0.1", displayVersion("158.0.1-default"))
++        assertEquals("159.0", displayVersion("159.0"))
++    }
++
++    @Test
++    fun `GIVEN the last check WHEN a day has passed THEN it's time to check again`() {
++        val lastCheck = 100 * 24 * HOUR_MS
++
++        assertTrue(isCheckDue(lastCheck = 0L, now = lastCheck))
++        assertFalse(isCheckDue(lastCheck = lastCheck, now = lastCheck + 23 * HOUR_MS))
++        assertTrue(isCheckDue(lastCheck = lastCheck, now = lastCheck + 24 * HOUR_MS))
++        // The clock went back.
++        assertTrue(isCheckDue(lastCheck = lastCheck, now = lastCheck - HOUR_MS))
++    }
++}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt
-index 4f2b7c1f10b..905ef44472c 100644
+index 4f2b7c1f..905ef444 100644
 --- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt
 @@ -208,7 +208,7 @@ class StatusBarColorManagerTest {
