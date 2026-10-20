@@ -1672,10 +1672,10 @@ index 1925b435..c1741b4e 100644
  
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt
 new file mode 100644
-index 00000000..5f85be94
+index 00000000..6a623eec
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt
-@@ -0,0 +1,382 @@
+@@ -0,0 +1,389 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -1800,6 +1800,13 @@ index 00000000..5f85be94
 +}
 +
 +/**
++ * Returns the version to show to the user: the Firefox version without the suffix of the build (e.g. "158.0.1" for
++ * "158.0.1-default").
++ */
++@VisibleForTesting
++internal fun displayVersion(versionName: String) = versionName.substringBefore('-')
++
++/**
 + * Whether it's time to look for an update again.
 + *
 + * @param lastCheck When the last check was done, in milliseconds.
@@ -1902,8 +1909,8 @@ index 00000000..5f85be94
 +                activity.getString(
 +                    R.string.self_update_available_message,
 +                    activity.getString(R.string.app_name),
-+                    update.versionName,
-+                    installedPackageInfo()?.versionName.orEmpty(),
++                    displayVersion(update.versionName),
++                    displayVersion(installedPackageInfo()?.versionName.orEmpty()),
 +                ),
 +            )
 +            .setPositiveButton(R.string.self_update_update) { _, _ -> downloadAndInstall(update) }
@@ -1932,7 +1939,7 @@ index 00000000..5f85be94
 +                .setNegativeButton(android.R.string.cancel) { _, _ -> download?.cancel() }
 +                .show()
 +
-+        val apk = File(File(activity.cacheDir, UPDATE_DIRECTORY), "firefox-${update.versionName}.apk")
++        val apk = File(File(activity.cacheDir, UPDATE_DIRECTORY), "firefox-${displayVersion(update.versionName)}.apk")
 +        val job =
 +            activity.lifecycleScope.launch {
 +                val isDownloaded =
@@ -3108,10 +3115,10 @@ index 00000000..210e7b08
 +}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/selfupdate/SelfUpdaterTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/selfupdate/SelfUpdaterTest.kt
 new file mode 100644
-index 00000000..54006e21
+index 00000000..44a5b3d5
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/selfupdate/SelfUpdaterTest.kt
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,101 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -3194,6 +3201,12 @@ index 00000000..54006e21
 +        assertFalse(update.isUpdateFor("org.mozilla.fenix", installedVersionCode = 1L) { true })
 +        // Signed with another key, e.g. a local build.
 +        assertFalse(update.isUpdateFor("org.mozilla.firefox", installedVersionCode = 1L) { false })
++    }
++
++    @Test
++    fun `GIVEN the version name of a build THEN the Firefox version is shown`() {
++        assertEquals("158.0.1", displayVersion("158.0.1-default"))
++        assertEquals("159.0", displayVersion("159.0"))
 +    }
 +
 +    @Test
