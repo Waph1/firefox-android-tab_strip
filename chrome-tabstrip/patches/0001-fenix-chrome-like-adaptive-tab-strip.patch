@@ -1,5 +1,5 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
-index daf3317d..a4a129e6 100644
+index daf3317d..78266119 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
 @@ -114,6 +114,8 @@ import org.mozilla.fenix.browser.BrowserFragmentDirections
@@ -11,7 +11,15 @@ index daf3317d..a4a129e6 100644
  import org.mozilla.fenix.components.DefaultHomepageAsANewTabPreferenceRepository
  import org.mozilla.fenix.components.DefaultShortcutManagerCompatWrapper
  import org.mozilla.fenix.components.accounts.FenixFxAEntryPoint
-@@ -413,6 +415,11 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -187,6 +189,7 @@ import org.mozilla.fenix.perf.StartupPathProvider
+ import org.mozilla.fenix.perf.StartupTimeline
+ import org.mozilla.fenix.perf.StartupTypeTelemetry
+ import org.mozilla.fenix.privacyreport.PrivacyReportNotificationScheduler
++import org.mozilla.fenix.selfupdate.SelfUpdater
+ import org.mozilla.fenix.session.PrivateNotificationService
+ import org.mozilla.fenix.settings.SupportUtils
+ import org.mozilla.fenix.shortcut.NewTabShortcutIntentProcessor.Companion.ACTION_OPEN_PRIVATE_TAB
+@@ -413,6 +416,11 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
          )
      }
  
@@ -23,7 +31,7 @@ index daf3317d..a4a129e6 100644
      // See onKeyDown for why this is necessary
      private var backLongPressJob: Job? = null
  
-@@ -477,6 +484,9 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -477,6 +485,9 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
              browsingModeManager = createBrowsingModeManager(intent)
              setupTheme()
  
@@ -33,19 +41,20 @@ index daf3317d..a4a129e6 100644
              super.onCreate(savedInstanceState)
          }
  
-@@ -485,6 +495,11 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -485,6 +496,12 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
          // the `setContent` starts attaching fragments.
          EdgeToEdgeFragmentLifecycleCallbacks.register(supportFragmentManager, window)
  
-+        // Custom tabs never show the tab strip.
++        // Custom tabs never show the tab strip, nor look for updates.
 +        if (this !is ExternalAppBrowserActivity) {
 +            immersiveTabStrip.start(supportFragmentManager)
++            SelfUpdater(this).start()
 +        }
 +
          // Checks if Activity is currently in PiP mode if launched from external intents, then exits it
          checkAndExitPiP()
  
-@@ -1023,6 +1038,12 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -1023,6 +1040,12 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
      }
  
      final override fun onConfigurationChanged(newConfig: Configuration) {
@@ -58,7 +67,7 @@ index daf3317d..a4a129e6 100644
          super.onConfigurationChanged(newConfig)
  
          // Diagnostic breadcrumb for "Display already aquired" crash:
-@@ -1032,6 +1053,18 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -1032,6 +1055,18 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
          components.appStore.dispatch(
              AppAction.OrientationChange(orientation = OrientationMode.fromInteger(newConfig.orientation))
          )
@@ -1661,6 +1670,394 @@ index 1925b435..c1741b4e 100644
                  tabStripContent()
              }
  
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt
+new file mode 100644
+index 00000000..5f85be94
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt
+@@ -0,0 +1,382 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.selfupdate
++
++import android.content.ActivityNotFoundException
++import android.content.Context
++import android.content.Intent
++import android.content.pm.PackageInfo
++import android.content.pm.PackageManager
++import android.os.Build.VERSION.SDK_INT
++import android.os.Build.VERSION_CODES
++import android.widget.FrameLayout
++import android.widget.ProgressBar
++import android.widget.Toast
++import androidx.annotation.VisibleForTesting
++import androidx.appcompat.app.AppCompatActivity
++import androidx.core.content.FileProvider
++import androidx.core.content.edit
++import androidx.core.content.pm.PackageInfoCompat
++import androidx.lifecycle.DefaultLifecycleObserver
++import androidx.lifecycle.LifecycleOwner
++import androidx.lifecycle.lifecycleScope
++import androidx.lifecycle.withResumed
++import com.google.android.material.dialog.MaterialAlertDialogBuilder
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.currentCoroutineContext
++import kotlinx.coroutines.ensureActive
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.withContext
++import mozilla.components.support.base.log.logger.Logger
++import org.json.JSONException
++import org.json.JSONObject
++import org.mozilla.fenix.R
++import java.io.File
++import java.io.IOException
++import java.net.HttpURLConnection
++import java.net.URL
++
++/**
++ * Where the GitHub Releases of the patch publish the description of the latest release (see [SelfUpdateInfo]). A fork
++ * publishing its own releases must change it: builds signed with another key are never offered these updates anyway.
++ */
++private const val UPDATE_INFO_URL =
++    "https://github.com/Waph1/firefox-android-tab_strip/releases/latest/download/update.json"
++
++private const val CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000L
++private const val TIMEOUT_MS = 30_000
++private const val BUFFER_SIZE = 64 * 1024
++private const val MAX_UPDATE_INFO_LENGTH = 16 * 1024
++private const val PERCENT = 100
++private const val DIALOG_PADDING_DP = 24
++
++private const val PREFERENCES_NAME = "chrome_tabstrip_self_update"
++private const val PREF_LAST_CHECK = "last_check"
++
++// In the cache directory, which the app file provider shares (see res/xml/file_paths.xml).
++private const val UPDATE_DIRECTORY = "self-update"
++private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
++
++/**
++ * Description of the latest release, read from the `update.json` file published with its APK.
++ *
++ * @property packageName The package name of the published app.
++ * @property versionName The version shown to the user, e.g. "158.0.1".
++ * @property versionCode The Android version code of the published APK.
++ * @property apkUrl Where to download the APK from.
++ * @property signingCertSha256 The SHA-256 digest of the certificate the APK is signed with, in lowercase hexadecimal.
++ */
++data class SelfUpdateInfo(
++    val packageName: String,
++    val versionName: String,
++    val versionCode: Long,
++    val apkUrl: String,
++    val signingCertSha256: String,
++) {
++    /**
++     * Whether this release updates the installed app: same app, newer and signed with the same key, so that Android
++     * installs it on top of the installed one.
++     *
++     * @param installedPackageName The package name of the installed app.
++     * @param installedVersionCode The version code of the installed app.
++     * @param isInstalledAppSignedWith Whether the installed app is signed with the certificate of the given digest.
++     */
++    fun isUpdateFor(
++        installedPackageName: String,
++        installedVersionCode: Long,
++        isInstalledAppSignedWith: (ByteArray) -> Boolean,
++    ) = packageName == installedPackageName &&
++        versionCode > installedVersionCode &&
++        isInstalledAppSignedWith(signingCertSha256.chunked(2).map { it.toInt(HEX_RADIX).toByte() }.toByteArray())
++
++    companion object {
++        private const val HEX_RADIX = 16
++        private val SHA256_HEX = Regex("[0-9a-f]{64}")
++
++        /**
++         * Parses the content of `update.json`, or returns `null` if it isn't valid.
++         */
++        fun fromJson(json: String): SelfUpdateInfo? =
++            try {
++                val info = JSONObject(json)
++                val apkUrl = info.getString("apkUrl")
++                val certificate = info.getString("signingCertSha256").lowercase()
++                if (!apkUrl.startsWith("https://") || !certificate.matches(SHA256_HEX)) {
++                    null
++                } else {
++                    SelfUpdateInfo(
++                        packageName = info.getString("packageName"),
++                        versionName = info.getString("versionName"),
++                        versionCode = info.getLong("versionCode"),
++                        apkUrl = apkUrl,
++                        signingCertSha256 = certificate,
++                    )
++                }
++            } catch (e: JSONException) {
++                null
++            }
++    }
++}
++
++/**
++ * Whether it's time to look for an update again.
++ *
++ * @param lastCheck When the last check was done, in milliseconds.
++ * @param now The current time, in milliseconds.
++ */
++@VisibleForTesting
++internal fun isCheckDue(
++    lastCheck: Long,
++    now: Long,
++) = now - lastCheck >= CHECK_INTERVAL_MS || now < lastCheck
++
++/**
++ * Lets this build of Firefox (with the Chrome-like tab strip, published in the GitHub Releases of the repository of
++ * the patch) update itself, like apps installed from outside the Play Store usually do.
++ *
++ * At most once a day, when the app comes to the foreground, it reads the description of the latest release (see
++ * [SelfUpdateInfo]). If that release is newer than the installed app and signed with the same key, it asks whether to
++ * update: the APK is then downloaded and handed over to the Android package installer, which asks for a last
++ * confirmation (and, the first time, to allow Firefox to install apps).
++ *
++ * Builds that can't be updated from the releases (local builds signed with another key, other variants like Nightly or
++ * debug) are never offered an update.
++ *
++ * @param activity The activity showing the dialogs.
++ * @param updateInfoUrl Where to read the description of the latest release.
++ * @param clock Returns the current time in milliseconds.
++ */
++class SelfUpdater(
++    private val activity: AppCompatActivity,
++    private val updateInfoUrl: String = UPDATE_INFO_URL,
++    private val clock: () -> Long = System::currentTimeMillis,
++) : DefaultLifecycleObserver {
++    private val logger = Logger("SelfUpdater")
++    private val preferences = activity.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
++    private var job: Job? = null
++
++    /** Starts looking for updates every time [activity] is resumed, at most once a day. */
++    fun start() {
++        activity.lifecycle.addObserver(this)
++    }
++
++    override fun onResume(owner: LifecycleOwner) {
++        if (job?.isActive == true || !isCheckDue(preferences.getLong(PREF_LAST_CHECK, 0L), clock())) return
++
++        job =
++            activity.lifecycleScope.launch {
++                val update =
++                    withContext(Dispatchers.IO) {
++                        // Drop the APK of a previous update, installed or not.
++                        File(activity.cacheDir, UPDATE_DIRECTORY).deleteRecursively()
++                        val json =
++                            try {
++                                readText(updateInfoUrl)
++                            } catch (e: IOException) {
++                                // Offline or GitHub unreachable: try again the next time the app is resumed.
++                                logger.info("Can't check for updates", e)
++                                return@withContext null
++                            }
++                        preferences.edit { putLong(PREF_LAST_CHECK, clock()) }
++                        json?.let { SelfUpdateInfo.fromJson(it) }?.takeIf { isUpdate(it) }
++                    }
++                if (update != null) {
++                    activity.withResumed { askToUpdate(update) }
++                }
++            }
++    }
++
++    private fun isUpdate(update: SelfUpdateInfo): Boolean {
++        val packageManager = activity.packageManager
++        val installed = installedPackageInfo() ?: return false
++        return update.isUpdateFor(
++            installedPackageName = activity.packageName,
++            installedVersionCode = PackageInfoCompat.getLongVersionCode(installed),
++        ) { certificate ->
++            PackageInfoCompat.hasSignatures(
++                packageManager,
++                activity.packageName,
++                mapOf(certificate to PackageManager.CERT_INPUT_SHA256),
++                false,
++            )
++        }
++    }
++
++    private fun installedPackageInfo(): PackageInfo? =
++        try {
++            if (SDK_INT >= VERSION_CODES.TIRAMISU) {
++                activity.packageManager.getPackageInfo(activity.packageName, PackageManager.PackageInfoFlags.of(0))
++            } else {
++                @Suppress("DEPRECATION")
++                activity.packageManager.getPackageInfo(activity.packageName, 0)
++            }
++        } catch (e: PackageManager.NameNotFoundException) {
++            null
++        }
++
++    private fun askToUpdate(update: SelfUpdateInfo) {
++        MaterialAlertDialogBuilder(activity)
++            .setTitle(R.string.self_update_available_title)
++            .setMessage(
++                activity.getString(
++                    R.string.self_update_available_message,
++                    activity.getString(R.string.app_name),
++                    update.versionName,
++                    installedPackageInfo()?.versionName.orEmpty(),
++                ),
++            )
++            .setPositiveButton(R.string.self_update_update) { _, _ -> downloadAndInstall(update) }
++            .setNegativeButton(R.string.self_update_later, null)
++            .show()
++    }
++
++    private fun downloadAndInstall(update: SelfUpdateInfo) {
++        val progressBar =
++            ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply {
++                isIndeterminate = true
++                max = PERCENT
++            }
++        val padding = (DIALOG_PADDING_DP * activity.resources.displayMetrics.density).toInt()
++        val content = FrameLayout(activity).apply {
++            setPadding(padding, padding / 2, padding, 0)
++            addView(progressBar)
++        }
++
++        var download: Job? = null
++        val dialog =
++            MaterialAlertDialogBuilder(activity)
++                .setTitle(R.string.self_update_downloading)
++                .setView(content)
++                .setCancelable(false)
++                .setNegativeButton(android.R.string.cancel) { _, _ -> download?.cancel() }
++                .show()
++
++        val apk = File(File(activity.cacheDir, UPDATE_DIRECTORY), "firefox-${update.versionName}.apk")
++        val job =
++            activity.lifecycleScope.launch {
++                val isDownloaded =
++                    withContext(Dispatchers.IO) {
++                        try {
++                            downloadFile(update.apkUrl, apk) { percent ->
++                                activity.runOnUiThread {
++                                    progressBar.isIndeterminate = false
++                                    progressBar.progress = percent
++                                }
++                            }
++                            isExpectedApk(apk, update)
++                        } catch (e: IOException) {
++                            logger.warn("Can't download the update", e)
++                            false
++                        }
++                    }
++                dialog.dismiss()
++                if (isDownloaded) {
++                    // The package installer can only be opened while the app is visible.
++                    activity.withResumed { install(apk) }
++                } else {
++                    apk.delete()
++                    Toast.makeText(activity, R.string.self_update_failed, Toast.LENGTH_LONG).show()
++                }
++            }
++        download = job
++        job.invokeOnCompletion { cause ->
++            // Cancelled by the user, or the activity was destroyed.
++            if (cause != null) {
++                dialog.dismiss()
++                apk.delete()
++            }
++        }
++    }
++
++    /** Whether [apk] is the complete APK described by [update]. */
++    private fun isExpectedApk(
++        apk: File,
++        update: SelfUpdateInfo,
++    ): Boolean {
++        val info =
++            if (SDK_INT >= VERSION_CODES.TIRAMISU) {
++                activity.packageManager.getPackageArchiveInfo(apk.path, PackageManager.PackageInfoFlags.of(0))
++            } else {
++                @Suppress("DEPRECATION")
++                activity.packageManager.getPackageArchiveInfo(apk.path, 0)
++            }
++        return info != null &&
++            info.packageName == update.packageName &&
++            PackageInfoCompat.getLongVersionCode(info) == update.versionCode
++    }
++
++    private fun install(apk: File) {
++        val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", apk)
++        val intent =
++            Intent(Intent.ACTION_VIEW)
++                .setDataAndType(uri, APK_MIME_TYPE)
++                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
++        try {
++            activity.startActivity(intent)
++        } catch (e: ActivityNotFoundException) {
++            logger.warn("No package installer", e)
++            Toast.makeText(activity, R.string.self_update_failed, Toast.LENGTH_LONG).show()
++        }
++    }
++
++    private fun openConnection(url: String) =
++        (URL(url).openConnection() as HttpURLConnection).apply {
++            connectTimeout = TIMEOUT_MS
++            readTimeout = TIMEOUT_MS
++            // GitHub redirects the download links to its storage.
++            instanceFollowRedirects = true
++        }
++
++    /** Returns the content of [url], or `null` if there is none (e.g. a release without `update.json`). */
++    private fun readText(url: String): String? {
++        val connection = openConnection(url)
++        try {
++            if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
++            val text = connection.inputStream.bufferedReader().use { it.readText() }
++            return text.takeIf { it.length <= MAX_UPDATE_INFO_LENGTH }
++        } finally {
++            connection.disconnect()
++        }
++    }
++
++    private suspend fun downloadFile(
++        url: String,
++        file: File,
++        onProgress: (percent: Int) -> Unit,
++    ) {
++        val connection = openConnection(url)
++        try {
++            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
++                throw IOException("HTTP ${connection.responseCode}")
++            }
++            val length = connection.contentLengthLong
++            file.parentFile?.mkdirs()
++            connection.inputStream.use { input ->
++                file.outputStream().use { output ->
++                    val buffer = ByteArray(BUFFER_SIZE)
++                    var downloaded = 0L
++                    var lastPercent = -1
++                    while (true) {
++                        currentCoroutineContext().ensureActive()
++                        val read = input.read(buffer)
++                        if (read < 0) break
++                        output.write(buffer, 0, read)
++                        downloaded += read
++                        if (length > 0) {
++                            val percent = (downloaded * PERCENT / length).toInt()
++                            if (percent != lastPercent) {
++                                lastPercent = percent
++                                onProgress(percent)
++                            }
++                        }
++                    }
++                }
++            }
++        } finally {
++            connection.disconnect()
++        }
++    }
++}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
 index 1956c4ef..6e10cbf3 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
@@ -1856,6 +2253,24 @@ index 2cda5731..f4d08fe4 100644
      /** Show the Addresses autofill feature. */
      private fun isAddressFeatureEnabled(context: Context): Boolean {
          val locale = LocaleManager.getCurrentLocale(context) ?: LocaleManager.getSystemDefault()
+diff --git a/mobile/android/fenix/app/src/main/res/values-it/self_update_strings.xml b/mobile/android/fenix/app/src/main/res/values-it/self_update_strings.xml
+new file mode 100644
+index 00000000..1da52440
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/res/values-it/self_update_strings.xml
+@@ -0,0 +1,12 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++<resources>
++    <string name="self_update_available_title">Aggiornamento disponibile</string>
++    <string name="self_update_available_message">È disponibile %1$s %2$s con la tab strip in stile Chrome (versione installata: %3$s). Vuoi aggiornare ora?</string>
++    <string name="self_update_update">Aggiorna</string>
++    <string name="self_update_later">Più tardi</string>
++    <string name="self_update_downloading">Scarico l’aggiornamento…</string>
++    <string name="self_update_failed">Non è stato possibile scaricare l’aggiornamento. Riprova più tardi.</string>
++</resources>
 diff --git a/mobile/android/fenix/app/src/main/res/values/dimens.xml b/mobile/android/fenix/app/src/main/res/values/dimens.xml
 index 3e3f13ba..412831d8 100644
 --- a/mobile/android/fenix/app/src/main/res/values/dimens.xml
@@ -1869,6 +2284,32 @@ index 3e3f13ba..412831d8 100644
      <dimen name="browser_microsurvey_height">131dp</dimen>
      <dimen name="tab_groups_strip_height">48dp</dimen>
  
+diff --git a/mobile/android/fenix/app/src/main/res/values/self_update_strings.xml b/mobile/android/fenix/app/src/main/res/values/self_update_strings.xml
+new file mode 100644
+index 00000000..1f0adec8
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/res/values/self_update_strings.xml
+@@ -0,0 +1,20 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++<!-- Updates of the build with the Chrome-like tab strip, from its GitHub Releases. Only translated in Italian. -->
++<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
++    <!-- Title of the dialog shown when a new release is available. -->
++    <string name="self_update_available_title">Update available</string>
++    <!-- Message of the dialog shown when a new release is available. %1$s is the app name, %2$s the new version
++         (e.g. 158.0.1), %3$s the installed version. -->
++    <string name="self_update_available_message">%1$s %2$s with the Chrome-like tab strip is available (installed version: %3$s). Update now?</string>
++    <!-- Button starting the download of the update. -->
++    <string name="self_update_update">Update</string>
++    <!-- Button postponing the update to the next day. -->
++    <string name="self_update_later">Later</string>
++    <!-- Title of the dialog shown while the update is downloaded. -->
++    <string name="self_update_downloading">Downloading the update…</string>
++    <!-- Message shown when the update could not be downloaded or opened. -->
++    <string name="self_update_failed">The update couldn’t be downloaded. Try again later.</string>
++</resources>
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeMiddlewareTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeMiddlewareTest.kt
 new file mode 100644
 index 00000000..a5d51722
@@ -2663,6 +3104,107 @@ index 00000000..210e7b08
 +            TabStripModeToggle(tabId = "1", url = "https://www.mozilla.org"),
 +            browserState.toTabStripModeToggle(isPrivateMode = true),
 +        )
++    }
++}
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/selfupdate/SelfUpdaterTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/selfupdate/SelfUpdaterTest.kt
+new file mode 100644
+index 00000000..54006e21
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/selfupdate/SelfUpdaterTest.kt
+@@ -0,0 +1,95 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.selfupdate
++
++import org.junit.Assert.assertArrayEquals
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.robolectric.RobolectricTestRunner
++
++private const val CERTIFICATE = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
++private const val HOUR_MS = 60 * 60 * 1000L
++
++@RunWith(RobolectricTestRunner::class)
++class SelfUpdaterTest {
++    private val update =
++        SelfUpdateInfo(
++            packageName = "org.mozilla.firefox",
++            versionName = "158.0.1",
++            versionCode = 2016000000L,
++            apkUrl = "https://github.com/owner/repo/releases/download/tag/firefox.apk",
++            signingCertSha256 = CERTIFICATE,
++        )
++
++    private fun json(
++        apkUrl: String = update.apkUrl,
++        certificate: String = CERTIFICATE,
++    ) = """
++        {
++          "packageName": "org.mozilla.firefox",
++          "versionName": "158.0.1",
++          "versionCode": 2016000000,
++          "apkUrl": "$apkUrl",
++          "signingCertSha256": "$certificate"
++        }
++    """
++
++    @Test
++    fun `GIVEN a valid update json WHEN parsed THEN the update is returned`() {
++        assertEquals(update, SelfUpdateInfo.fromJson(json()))
++        assertEquals(update, SelfUpdateInfo.fromJson(json(certificate = CERTIFICATE.uppercase())))
++    }
++
++    @Test
++    fun `GIVEN an invalid update json WHEN parsed THEN there is no update`() {
++        assertNull(SelfUpdateInfo.fromJson("Not Found"))
++        assertNull(SelfUpdateInfo.fromJson("""{ "packageName": "org.mozilla.firefox" }"""))
++        assertNull(SelfUpdateInfo.fromJson(json(apkUrl = "http://example.com/firefox.apk")))
++        assertNull(SelfUpdateInfo.fromJson(json(certificate = "0123")))
++    }
++
++    @Test
++    fun `GIVEN a newer release of the same app signed with the same key THEN it is an update`() {
++        var checkedCertificate: ByteArray? = null
++
++        val isUpdate =
++            update.isUpdateFor("org.mozilla.firefox", installedVersionCode = 2015000000L) { certificate ->
++                checkedCertificate = certificate
++                true
++            }
++
++        assertTrue(isUpdate)
++        assertArrayEquals(
++            ByteArray(32) { i -> ((i % 8) * 0x22 + 0x01).toByte() },
++            checkedCertificate,
++        )
++    }
++
++    @Test
++    fun `GIVEN a release that can't be installed on top of the app THEN it is not an update`() {
++        // Same or older version.
++        assertFalse(update.isUpdateFor("org.mozilla.firefox", installedVersionCode = 2016000000L) { true })
++        assertFalse(update.isUpdateFor("org.mozilla.firefox", installedVersionCode = 2017000000L) { true })
++        // Another app, e.g. the Nightly or debug variant.
++        assertFalse(update.isUpdateFor("org.mozilla.fenix", installedVersionCode = 1L) { true })
++        // Signed with another key, e.g. a local build.
++        assertFalse(update.isUpdateFor("org.mozilla.firefox", installedVersionCode = 1L) { false })
++    }
++
++    @Test
++    fun `GIVEN the last check WHEN a day has passed THEN it's time to check again`() {
++        val lastCheck = 100 * 24 * HOUR_MS
++
++        assertTrue(isCheckDue(lastCheck = 0L, now = lastCheck))
++        assertFalse(isCheckDue(lastCheck = lastCheck, now = lastCheck + 23 * HOUR_MS))
++        assertTrue(isCheckDue(lastCheck = lastCheck, now = lastCheck + 24 * HOUR_MS))
++        // The clock went back.
++        assertTrue(isCheckDue(lastCheck = lastCheck, now = lastCheck - HOUR_MS))
 +    }
 +}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/theme/StatusBarColorManagerTest.kt
