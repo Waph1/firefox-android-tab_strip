@@ -1672,10 +1672,10 @@ index 1925b435..c1741b4e 100644
  
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt
 new file mode 100644
-index 00000000..6a623eec
+index 00000000..878e7d62
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt
-@@ -0,0 +1,389 @@
+@@ -0,0 +1,431 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -1755,8 +1755,19 @@ index 00000000..6a623eec
 +    val signingCertSha256: String,
 +) {
 +    /**
-+     * Whether this release updates the installed app: same app, newer and signed with the same key, so that Android
-+     * installs it on top of the installed one.
++     * Whether Android can install this release on top of the installed app: same app, signed with the same key.
++     *
++     * @param installedPackageName The package name of the installed app.
++     * @param isInstalledAppSignedWith Whether the installed app is signed with the certificate of the given digest.
++     */
++    fun canBeInstalledOver(
++        installedPackageName: String,
++        isInstalledAppSignedWith: (ByteArray) -> Boolean,
++    ) = packageName == installedPackageName &&
++        isInstalledAppSignedWith(signingCertSha256.chunked(2).map { it.toInt(HEX_RADIX).toByte() }.toByteArray())
++
++    /**
++     * Whether this release updates the installed app: it [canBeInstalledOver] it and is newer.
 +     *
 +     * @param installedPackageName The package name of the installed app.
 +     * @param installedVersionCode The version code of the installed app.
@@ -1766,9 +1777,7 @@ index 00000000..6a623eec
 +        installedPackageName: String,
 +        installedVersionCode: Long,
 +        isInstalledAppSignedWith: (ByteArray) -> Boolean,
-+    ) = packageName == installedPackageName &&
-+        versionCode > installedVersionCode &&
-+        isInstalledAppSignedWith(signingCertSha256.chunked(2).map { it.toInt(HEX_RADIX).toByte() }.toByteArray())
++    ) = versionCode > installedVersionCode && canBeInstalledOver(installedPackageName, isInstalledAppSignedWith)
 +
 +    companion object {
 +        private const val HEX_RADIX = 16
@@ -1828,7 +1837,7 @@ index 00000000..6a623eec
 + * confirmation (and, the first time, to allow Firefox to install apps).
 + *
 + * Builds that can't be updated from the releases (local builds signed with another key, other variants like Nightly or
-+ * debug) are never offered an update.
++ * debug) are never offered an update. The user can also look for an update right away (see [checkNow]).
 + *
 + * @param activity The activity showing the dialogs.
 + * @param updateInfoUrl Where to read the description of the latest release.
@@ -1853,41 +1862,72 @@ index 00000000..6a623eec
 +
 +        job =
 +            activity.lifecycleScope.launch {
-+                val update =
-+                    withContext(Dispatchers.IO) {
-+                        // Drop the APK of a previous update, installed or not.
-+                        File(activity.cacheDir, UPDATE_DIRECTORY).deleteRecursively()
-+                        val json =
-+                            try {
-+                                readText(updateInfoUrl)
-+                            } catch (e: IOException) {
-+                                // Offline or GitHub unreachable: try again the next time the app is resumed.
-+                                logger.info("Can't check for updates", e)
-+                                return@withContext null
-+                            }
-+                        preferences.edit { putLong(PREF_LAST_CHECK, clock()) }
-+                        json?.let { SelfUpdateInfo.fromJson(it) }?.takeIf { isUpdate(it) }
-+                    }
-+                if (update != null) {
-+                    activity.withResumed { askToUpdate(update) }
++                val result = check()
++                if (result is CheckResult.Available) {
++                    activity.withResumed { askToUpdate(result.update) }
 +                }
 +            }
 +    }
 +
-+    private fun isUpdate(update: SelfUpdateInfo): Boolean {
-+        val packageManager = activity.packageManager
-+        val installed = installedPackageInfo() ?: return false
-+        return update.isUpdateFor(
-+            installedPackageName = activity.packageName,
-+            installedVersionCode = PackageInfoCompat.getLongVersionCode(installed),
-+        ) { certificate ->
-+            PackageInfoCompat.hasSignatures(
-+                packageManager,
-+                activity.packageName,
-+                mapOf(certificate to PackageManager.CERT_INPUT_SHA256),
-+                false,
-+            )
++    /** Looks for an update right away (e.g. from the settings) and tells the user what was found. */
++    fun checkNow() {
++        Toast.makeText(activity, R.string.self_update_checking, Toast.LENGTH_SHORT).show()
++        activity.lifecycleScope.launch {
++            val appName = activity.getString(R.string.app_name)
++            when (val result = check()) {
++                is CheckResult.Available -> activity.withResumed { askToUpdate(result.update) }
++                CheckResult.UpToDate -> showToast(activity.getString(R.string.self_update_up_to_date, appName))
++                CheckResult.NotUpdatable -> showToast(activity.getString(R.string.self_update_not_available, appName))
++                CheckResult.Failed -> showToast(activity.getString(R.string.self_update_check_failed))
++            }
 +        }
++    }
++
++    private sealed interface CheckResult {
++        data class Available(val update: SelfUpdateInfo) : CheckResult
++
++        data object UpToDate : CheckResult
++
++        /** This build can't be updated from the releases, e.g. a local build signed with another key. */
++        data object NotUpdatable : CheckResult
++
++        data object Failed : CheckResult
++    }
++
++    private suspend fun check(): CheckResult =
++        withContext(Dispatchers.IO) {
++            // Drop the APK of a previous update, installed or not.
++            File(activity.cacheDir, UPDATE_DIRECTORY).deleteRecursively()
++            val json =
++                try {
++                    readText(updateInfoUrl)
++                } catch (e: IOException) {
++                    // Offline or GitHub unreachable: the daily check is tried again the next time the app is resumed.
++                    logger.info("Can't check for updates", e)
++                    return@withContext CheckResult.Failed
++                }
++            preferences.edit { putLong(PREF_LAST_CHECK, clock()) }
++
++            // No (valid) description: e.g. a release published before the updates from the app existed.
++            val update = json?.let { SelfUpdateInfo.fromJson(it) } ?: return@withContext CheckResult.UpToDate
++            val installed = installedPackageInfo() ?: return@withContext CheckResult.NotUpdatable
++            when {
++                !update.canBeInstalledOver(activity.packageName, ::isInstalledAppSignedWith) -> CheckResult.NotUpdatable
++                update.versionCode > PackageInfoCompat.getLongVersionCode(installed) -> CheckResult.Available(update)
++                else -> CheckResult.UpToDate
++            }
++        }
++
++    private fun isInstalledAppSignedWith(certificate: ByteArray) =
++        PackageInfoCompat.hasSignatures(
++            activity.packageManager,
++            activity.packageName,
++            mapOf(certificate to PackageManager.CERT_INPUT_SHA256),
++            false,
++        )
++
++    private fun showToast(message: String) {
++        Toast.makeText(activity, message, Toast.LENGTH_LONG).show()
 +    }
 +
 +    private fun installedPackageInfo(): PackageInfo? =
@@ -1915,6 +1955,8 @@ index 00000000..6a623eec
 +            )
 +            .setPositiveButton(R.string.self_update_update) { _, _ -> downloadAndInstall(update) }
 +            .setNegativeButton(R.string.self_update_later, null)
++            // Only the buttons close it, so that it isn't dismissed by mistake.
++            .setCancelable(false)
 +            .show()
 +    }
 +
@@ -2093,6 +2135,58 @@ index 1956c4ef..6e10cbf3 100644
  
          requirePreference<PreferenceCategory>(R.string.pref_key_tab_strip_location).isVisible = isTabStripEnabled
          if (!isTabStripEnabled) return
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutFragment.kt
+index 1a9f9ca0..53cfe207 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutFragment.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutFragment.kt
+@@ -13,6 +13,7 @@ import android.view.View
+ import android.view.ViewGroup
+ import android.widget.Toast
+ import androidx.annotation.VisibleForTesting
++import androidx.appcompat.app.AppCompatActivity
+ import androidx.core.content.pm.PackageInfoCompat
+ import androidx.fragment.app.Fragment
+ import androidx.lifecycle.Lifecycle
+@@ -28,6 +29,7 @@ import org.mozilla.fenix.ext.components
+ import org.mozilla.fenix.ext.openToBrowser
+ import org.mozilla.fenix.ext.requireComponents
+ import org.mozilla.fenix.ext.showToolbar
++import org.mozilla.fenix.selfupdate.SelfUpdater
+ import org.mozilla.fenix.settings.SupportUtils
+ import org.mozilla.fenix.settings.about.AboutItemType.LICENSING_INFO
+ import org.mozilla.fenix.settings.about.AboutItemType.PRIVACY_NOTICE
+@@ -195,6 +197,7 @@ class AboutFragment(private val toastHandler: ToastHandler = DefaultToastHandler
+         val context = requireContext()
+ 
+         return listOf(
++            AboutPageItem(AboutItem.CheckForUpdates, getString(R.string.self_update_check)),
+             AboutPageItem(
+                 AboutItem.ExternalLink(
+                     WHATS_NEW,
+@@ -275,6 +278,9 @@ class AboutFragment(private val toastHandler: ToastHandler = DefaultToastHandler
+                 val navController = findNavController()
+                 navController.navigate(R.id.action_aboutFragment_to_crashListFragment)
+             }
++            is AboutItem.CheckForUpdates -> {
++                SelfUpdater(requireActivity() as AppCompatActivity).checkNow()
++            }
+         }
+     }
+ 
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutItem.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutItem.kt
+index e3e0ab6a..ecb5890d 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutItem.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutItem.kt
+@@ -10,6 +10,9 @@ sealed class AboutItem {
+     object Libraries : AboutItem()
+ 
+     object Crashes : AboutItem()
++
++    /** Looks for an update of the build with the Chrome-like tab strip, from its GitHub Releases. */
++    object CheckForUpdates : AboutItem()
+ }
+ 
+ enum class AboutItemType {
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/sitepermissions/SiteSettingsFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/sitepermissions/SiteSettingsFragment.kt
 index f3db19ef..6f90b362 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/sitepermissions/SiteSettingsFragment.kt
@@ -2262,10 +2356,10 @@ index 2cda5731..f4d08fe4 100644
          val locale = LocaleManager.getCurrentLocale(context) ?: LocaleManager.getSystemDefault()
 diff --git a/mobile/android/fenix/app/src/main/res/values-it/self_update_strings.xml b/mobile/android/fenix/app/src/main/res/values-it/self_update_strings.xml
 new file mode 100644
-index 00000000..1da52440
+index 00000000..a463002d
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/res/values-it/self_update_strings.xml
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,17 @@
 +<?xml version="1.0" encoding="utf-8"?>
 +<!-- This Source Code Form is subject to the terms of the Mozilla Public
 +   - License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -2277,6 +2371,11 @@ index 00000000..1da52440
 +    <string name="self_update_later">Più tardi</string>
 +    <string name="self_update_downloading">Scarico l’aggiornamento…</string>
 +    <string name="self_update_failed">Non è stato possibile scaricare l’aggiornamento. Riprova più tardi.</string>
++    <string name="self_update_check">Cerca aggiornamenti</string>
++    <string name="self_update_checking">Cerco aggiornamenti…</string>
++    <string name="self_update_up_to_date">%1$s è aggiornato</string>
++    <string name="self_update_not_available">Questa versione di %1$s non si aggiorna da GitHub</string>
++    <string name="self_update_check_failed">Impossibile cercare aggiornamenti. Riprova più tardi.</string>
 +</resources>
 diff --git a/mobile/android/fenix/app/src/main/res/values/dimens.xml b/mobile/android/fenix/app/src/main/res/values/dimens.xml
 index 3e3f13ba..412831d8 100644
@@ -2293,10 +2392,10 @@ index 3e3f13ba..412831d8 100644
  
 diff --git a/mobile/android/fenix/app/src/main/res/values/self_update_strings.xml b/mobile/android/fenix/app/src/main/res/values/self_update_strings.xml
 new file mode 100644
-index 00000000..1f0adec8
+index 00000000..fef279ff
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/res/values/self_update_strings.xml
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,31 @@
 +<?xml version="1.0" encoding="utf-8"?>
 +<!-- This Source Code Form is subject to the terms of the Mozilla Public
 +   - License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -2316,6 +2415,17 @@ index 00000000..1f0adec8
 +    <string name="self_update_downloading">Downloading the update…</string>
 +    <!-- Message shown when the update could not be downloaded or opened. -->
 +    <string name="self_update_failed">The update couldn’t be downloaded. Try again later.</string>
++    <!-- Item of the About page looking for an update right away. -->
++    <string name="self_update_check">Check for updates</string>
++    <!-- Message shown while looking for an update from the About page. -->
++    <string name="self_update_checking">Checking for updates…</string>
++    <!-- Message shown when there is no update. %1$s is the app name. -->
++    <string name="self_update_up_to_date">%1$s is up to date</string>
++    <!-- Message shown when this build can't be updated from the GitHub Releases (e.g. a local build). %1$s is the app
++         name. -->
++    <string name="self_update_not_available">This version of %1$s can’t be updated from GitHub</string>
++    <!-- Message shown when the check for updates failed, e.g. offline. -->
++    <string name="self_update_check_failed">Couldn’t check for updates. Try again later.</string>
 +</resources>
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeMiddlewareTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/desktopmode/AdaptiveDesktopModeMiddlewareTest.kt
 new file mode 100644
@@ -3115,10 +3225,10 @@ index 00000000..210e7b08
 +}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/selfupdate/SelfUpdaterTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/selfupdate/SelfUpdaterTest.kt
 new file mode 100644
-index 00000000..44a5b3d5
+index 00000000..0cc78114
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/selfupdate/SelfUpdaterTest.kt
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,108 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -3201,6 +3311,13 @@ index 00000000..44a5b3d5
 +        assertFalse(update.isUpdateFor("org.mozilla.fenix", installedVersionCode = 1L) { true })
 +        // Signed with another key, e.g. a local build.
 +        assertFalse(update.isUpdateFor("org.mozilla.firefox", installedVersionCode = 1L) { false })
++    }
++
++    @Test
++    fun `GIVEN a release of the same app signed with the same key THEN it can be installed over it`() {
++        assertTrue(update.canBeInstalledOver("org.mozilla.firefox") { true })
++        assertFalse(update.canBeInstalledOver("org.mozilla.fenix") { true })
++        assertFalse(update.canBeInstalledOver("org.mozilla.firefox") { false })
 +    }
 +
 +    @Test
