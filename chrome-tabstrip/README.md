@@ -153,6 +153,8 @@ Gli APK pubblicati nelle Release si aggiornano da soli, come le app installate f
 - se c'è una versione più recente, firmata con la stessa chiave, chiede **«Aggiornamento disponibile… Vuoi
   aggiornare ora?»**: con **Aggiorna** scarica l'APK (con la barra di avanzamento) e apre l'installazione di Android,
   che chiede l'ultima conferma; con **Più tardi** lo richiede il giorno dopo;
+- per controllare subito, senza aspettare il giorno dopo: **Impostazioni → Informazioni su Firefox → Cerca
+  aggiornamenti** (dice anche se Firefox è già aggiornato o se questa versione non si aggiorna da GitHub);
 - la prima volta Android chiede di **consentire a Firefox di installare app** (Impostazioni → Installa app
   sconosciute): basta attivare l'interruttore e tornare indietro.
 
@@ -162,7 +164,7 @@ aggiornamenti. Chi usa un fork con le proprie Release deve cambiare `UPDATE_INFO
 ## Versione di Firefox
 
 La patch segue le **versioni stabili** di Firefox per Android: gli script scaricano automaticamente l'ultima
-versione stabile pubblicata, cioè il tag `FIREFOX-ANDROID_<versione>_RELEASE` più recente (oggi **158.0.1**), che è
+versione stabile pubblicata, cioè il tag `FIREFOX-ANDROID_<versione>_RELEASE` più recente (oggi **158.0.2**), che è
 esattamente il codice da cui Mozilla compila Firefox per il Play Store. Il file [`UPSTREAM_BASE`](UPSTREAM_BASE)
 indica il commit di Firefox su cui la patch è stata verificata l'ultima volta.
 
@@ -293,6 +295,7 @@ Modifiche piccole ai file esistenti:
   sempre sito desktop» si aggiorna se si apre/chiude il telefono con la schermata aperta.
 - `CustomizationFragment.kt` — l'interruttore e la posizione della strip nelle impostazioni usano la preferenza
   utente.
+- `settings/about/AboutFragment.kt`, `AboutItem.kt` — la voce «Cerca aggiornamenti» in Informazioni su Firefox.
 - `TabStrip.kt` (usa `ChromeStyleTabStripContent`), `TabStripState.kt` (stato di caricamento), `dimens.xml`
   (altezza 40dp), `StatusBarColorManagerTest.kt` (adeguato alle modifiche).
 
