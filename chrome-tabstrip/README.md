@@ -187,6 +187,31 @@ sono elencate in **Impostazioni → Informazioni su Firefox → Funzioni della p
   indirizzo o una ricerca (con la tastiera a schermo, se non c'è una tastiera fisica). La scheda nuova è privata se
   la tab strip mostra le schede private. Upstream la barra viene selezionata solo con alcune impostazioni della home
   (ad es. non quando la home è mostrata in una scheda propria).
+- **Scorciatoie da tastiera fisica** (`0020`), come in Chrome e in Firefox per computer. Firefox le riceve **prima
+  della pagina**, così funzionano anche mentre si scrive in un sito; l'elenco compare anche nella schermata delle
+  scorciatoie di Android (**Meta+/**).
+
+  | Tasti                               | Azione                                                                  |
+  |-------------------------------------|-------------------------------------------------------------------------|
+  | Ctrl+T                              | nuova scheda (con la barra attiva, se c'è anche la funzione `0010`)     |
+  | Ctrl+W, Ctrl+F4                     | chiude la scheda; sull'ultima torna alla home                           |
+  | Ctrl+Shift+T                        | riapre l'ultima scheda chiusa                                           |
+  | Ctrl+Tab / Ctrl+Shift+Tab           | scheda successiva / precedente, in giro (tenendo premuto continua)      |
+  | Ctrl+PagGiù / Ctrl+PagSu            | come Ctrl+Tab / Ctrl+Shift+Tab                                          |
+  | Ctrl+1 … Ctrl+8, Ctrl+9             | va alla scheda N; Ctrl+9 all'ultima                                     |
+  | Ctrl+L, Alt+D, F6                   | seleziona la barra degli indirizzi                                      |
+  | Ctrl+R, F5                          | aggiorna la pagina                                                      |
+  | Ctrl+Shift+R, Ctrl+F5               | aggiorna ignorando la cache                                             |
+  | Alt+← / Alt+→                       | indietro / avanti                                                       |
+  | Ctrl+F                              | trova nella pagina                                                      |
+  | Ctrl+D                              | aggiunge la pagina ai segnalibri                                        |
+  | Alt (premuto e rilasciato da solo), F10 | apre il menu                                                        |
+  | Ctrl+Q                              | chiude Firefox **senza conferma**: le schede restano per la prossima apertura |
+
+  Ctrl+T e Ctrl+Q funzionano ovunque, le altre sulle pagine e sulla home (non, ad es., nelle impostazioni). Ctrl+Shift+T
+  riapre subito le schede appena chiuse (anche private, come «Annulla»), poi l'ultima delle schede chiuse di recente
+  (solo normali). AltGr (usato per scrivere caratteri come @ o [) e il tasto Meta non attivano scorciatoie. Limite:
+  i siti che usano le stesse combinazioni (ad es. Ctrl+F in un editor online) non le ricevono.
 
 ## Versione di Firefox
 
@@ -395,13 +420,22 @@ questa versione»), `ChromeStyleTabStrip.kt` (menu con la pressione prolungata),
 
 Modifiche piccole ai file esistenti: `TabStrip.kt` (azioni del menu; il "+" lascia aprire la nuova scheda alle
 funzioni facoltative, con `PatchFeatureHooks.openNewTab`), `BaseBrowserFragment.kt`, `HomeFragment.kt`
-(messaggio «Schede chiuse» con Annulla dopo «Chiudi le altre schede»).
+(messaggio «Schede chiuse» con Annulla dopo «Chiudi le altre schede»), `HomeActivity.kt` (i tasti passano prima dalle
+funzioni facoltative, `PatchFeatureHooks.onKeyEvent`, che compaiono anche nella schermata delle scorciatoie di
+Android, `PatchFeatureHooks.keyboardShortcuts`).
 
 ### `0010`: nuova scheda con la barra degli indirizzi attiva (facoltativa)
 
 Solo file nuovi: `patchfeatures/NewTabFocusFeature.kt` apre la nuova scheda come Firefox (una scheda con la home, se
 la home è mostrata in una scheda propria) e poi mostra la home con la barra degli indirizzi selezionata
 (`focusOnAddressBar`, lo stesso argomento che Firefox usa altrove); `test/.../NewTabFocusFeatureTest.kt`.
+
+### `0020`: scorciatoie da tastiera fisica (facoltativa)
+
+Solo file nuovi: `patchfeatures/KeyboardShortcuts.kt` (dai tasti alla scorciatoia, scelta della scheda, Alt premuto da
+solo), `KeyboardShortcutsFeature.kt` (le azioni, fatte come le fa Firefox: ad es. il segnalibro come il pulsante della
+toolbar, il menu come il tasto Menu), `res/values/` e `res/values-it/keyboard_shortcuts_strings.xml`,
+`test/.../KeyboardShortcutsTest.kt`.
 
 ## Differenze rispetto a Chrome
 

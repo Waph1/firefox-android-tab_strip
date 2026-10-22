@@ -1,0 +1,637 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/KeyboardShortcuts.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/KeyboardShortcuts.kt
+new file mode 100644
+index 00000000..cc1509eb
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/KeyboardShortcuts.kt
+@@ -0,0 +1,201 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import android.view.KeyEvent
++
++/** A keyboard shortcut of a physical keyboard (see [keyboardShortcut]). */
++internal sealed interface KeyboardShortcut {
++    /** Whether the shortcut acts again while its keys are held down, like switching tabs in Chrome. */
++    val repeats: Boolean
++        get() = false
++
++    /** Whether the shortcut also works away from the browser and the homepage, e.g. in the settings. */
++    val worksEverywhere: Boolean
++        get() = false
++
++    data object NewTab : KeyboardShortcut {
++        override val worksEverywhere = true
++    }
++
++    data object CloseTab : KeyboardShortcut
++
++    data object ReopenClosedTab : KeyboardShortcut
++
++    data object NextTab : KeyboardShortcut {
++        override val repeats = true
++    }
++
++    data object PreviousTab : KeyboardShortcut {
++        override val repeats = true
++    }
++
++    /**
++     * Selects the tab at [index] in the tab strip.
++     *
++     * @property index The position of the tab, starting from 0.
++     */
++    data class SelectTab(
++        val index: Int,
++    ) : KeyboardShortcut
++
++    data object LastTab : KeyboardShortcut
++
++    data object FocusAddressBar : KeyboardShortcut
++
++    data object Reload : KeyboardShortcut
++
++    data object ReloadBypassingCache : KeyboardShortcut
++
++    data object Back : KeyboardShortcut
++
++    data object Forward : KeyboardShortcut
++
++    data object FindInPage : KeyboardShortcut
++
++    data object Bookmark : KeyboardShortcut
++
++    data object OpenMenu : KeyboardShortcut
++
++    data object Quit : KeyboardShortcut {
++        override val worksEverywhere = true
++    }
++}
++
++private const val SELECTABLE_TABS = 8
++
++/**
++ * Returns the keyboard shortcut of a key pressed with the given modifiers, like in Chrome and Firefox for desktop, or
++ * `null` if it isn't one. Combinations with the Meta key and with AltGr (the right Alt key, used to type characters
++ * like @ or [ on many layouts) are never shortcuts.
++ *
++ * @param keyCode The key, see [KeyEvent.getKeyCode].
++ * @param metaState The modifiers, see [KeyEvent.getMetaState].
++ */
++internal fun keyboardShortcut(
++    keyCode: Int,
++    metaState: Int,
++): KeyboardShortcut? {
++    if ((metaState and (KeyEvent.META_META_ON or KeyEvent.META_ALT_RIGHT_ON)) != 0) return null
++    val ctrl = (metaState and KeyEvent.META_CTRL_ON) != 0
++    val shift = (metaState and KeyEvent.META_SHIFT_ON) != 0
++    val alt = (metaState and KeyEvent.META_ALT_ON) != 0
++    return when {
++        ctrl && !alt && shift -> ctrlShiftShortcut(keyCode)
++        ctrl && !alt -> ctrlShortcut(keyCode)
++        alt && !ctrl && !shift -> altShortcut(keyCode)
++        !ctrl && !alt && !shift -> plainShortcut(keyCode)
++        else -> null
++    }
++}
++
++private fun ctrlShortcut(keyCode: Int): KeyboardShortcut? =
++    when (keyCode) {
++        KeyEvent.KEYCODE_T -> KeyboardShortcut.NewTab
++        KeyEvent.KEYCODE_W, KeyEvent.KEYCODE_F4 -> KeyboardShortcut.CloseTab
++        KeyEvent.KEYCODE_TAB, KeyEvent.KEYCODE_PAGE_DOWN -> KeyboardShortcut.NextTab
++        KeyEvent.KEYCODE_PAGE_UP -> KeyboardShortcut.PreviousTab
++        in KeyEvent.KEYCODE_1 until KeyEvent.KEYCODE_1 + SELECTABLE_TABS ->
++            KeyboardShortcut.SelectTab(keyCode - KeyEvent.KEYCODE_1)
++        KeyEvent.KEYCODE_9 -> KeyboardShortcut.LastTab
++        KeyEvent.KEYCODE_L -> KeyboardShortcut.FocusAddressBar
++        KeyEvent.KEYCODE_R -> KeyboardShortcut.Reload
++        KeyEvent.KEYCODE_F5 -> KeyboardShortcut.ReloadBypassingCache
++        KeyEvent.KEYCODE_F -> KeyboardShortcut.FindInPage
++        KeyEvent.KEYCODE_D -> KeyboardShortcut.Bookmark
++        KeyEvent.KEYCODE_Q -> KeyboardShortcut.Quit
++        else -> null
++    }
++
++private fun ctrlShiftShortcut(keyCode: Int): KeyboardShortcut? =
++    when (keyCode) {
++        KeyEvent.KEYCODE_T -> KeyboardShortcut.ReopenClosedTab
++        KeyEvent.KEYCODE_TAB -> KeyboardShortcut.PreviousTab
++        KeyEvent.KEYCODE_R -> KeyboardShortcut.ReloadBypassingCache
++        else -> null
++    }
++
++private fun altShortcut(keyCode: Int): KeyboardShortcut? =
++    when (keyCode) {
++        KeyEvent.KEYCODE_D -> KeyboardShortcut.FocusAddressBar
++        KeyEvent.KEYCODE_DPAD_LEFT -> KeyboardShortcut.Back
++        KeyEvent.KEYCODE_DPAD_RIGHT -> KeyboardShortcut.Forward
++        else -> null
++    }
++
++private fun plainShortcut(keyCode: Int): KeyboardShortcut? =
++    when (keyCode) {
++        KeyEvent.KEYCODE_F5 -> KeyboardShortcut.Reload
++        KeyEvent.KEYCODE_F6 -> KeyboardShortcut.FocusAddressBar
++        KeyEvent.KEYCODE_F10 -> KeyboardShortcut.OpenMenu
++        else -> null
++    }
++
++/**
++ * Returns the id of the tab to select for a tab switching [shortcut], or `null` if there is none.
++ *
++ * @param shortcut The shortcut.
++ * @param tabIds The ids of the tabs, in the order of the tab strip.
++ * @param selectedTabId The id of the selected tab, if it is one of [tabIds].
++ */
++internal fun tabToSelect(
++    shortcut: KeyboardShortcut,
++    tabIds: List<String>,
++    selectedTabId: String?,
++): String? {
++    if (tabIds.isEmpty()) return null
++    val selectedIndex = tabIds.indexOf(selectedTabId)
++    return when (shortcut) {
++        // Like Chrome, cycles through the tabs.
++        KeyboardShortcut.NextTab -> tabIds[(selectedIndex + 1).mod(tabIds.size)]
++        KeyboardShortcut.PreviousTab ->
++            tabIds[(if (selectedIndex < 0) tabIds.lastIndex else selectedIndex - 1).mod(tabIds.size)]
++        is KeyboardShortcut.SelectTab -> tabIds.getOrNull(shortcut.index)
++        KeyboardShortcut.LastTab -> tabIds.last()
++        else -> null
++    }
++}
++
++/**
++ * Tells when the left Alt key is pressed and released alone, which opens the menu like in Firefox for desktop.
++ */
++internal class AltKeyTracker {
++    private var altDownTime: Long? = null
++
++    /**
++     * Records a key event and returns whether it releases the left Alt key pressed alone: no other key was pressed in
++     * between, and it was pressed in this window (when switching windows with Alt+Tab, the Alt key is pressed in
++     * another window).
++     *
++     * @param keyCode The key, see [KeyEvent.getKeyCode].
++     * @param action The action, see [KeyEvent.getAction].
++     * @param metaState The modifiers, see [KeyEvent.getMetaState].
++     * @param downTime When the key was pressed, see [KeyEvent.getDownTime].
++     * @param repeatCount See [KeyEvent.getRepeatCount].
++     */
++    fun isAltReleasedAlone(
++        keyCode: Int,
++        action: Int,
++        metaState: Int,
++        downTime: Long,
++        repeatCount: Int,
++    ): Boolean {
++        if (keyCode != KeyEvent.KEYCODE_ALT_LEFT) {
++            if (action == KeyEvent.ACTION_DOWN) altDownTime = null
++            return false
++        }
++        return when (action) {
++            KeyEvent.ACTION_DOWN -> {
++                if (repeatCount == 0) {
++                    val otherModifiers = metaState and (KeyEvent.META_ALT_ON or KeyEvent.META_ALT_LEFT_ON).inv()
++                    altDownTime = if (otherModifiers == 0) downTime else null
++                }
++                false
++            }
++            KeyEvent.ACTION_UP -> (altDownTime == downTime).also { altDownTime = null }
++            else -> false
++        }
++    }
++}
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/KeyboardShortcutsFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/KeyboardShortcutsFeature.kt
+new file mode 100644
+index 00000000..c61cfdb5
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/KeyboardShortcutsFeature.kt
+@@ -0,0 +1,231 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import android.content.Context
++import android.view.KeyEvent
++import android.view.KeyboardShortcutInfo
++import androidx.lifecycle.lifecycleScope
++import androidx.navigation.NavController
++import androidx.navigation.findNavController
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.launch
++import mozilla.components.browser.state.action.RecentlyClosedAction
++import mozilla.components.browser.state.selector.getNormalOrPrivateTabs
++import mozilla.components.browser.state.selector.selectedTab
++import mozilla.components.concept.engine.EngineSession.LoadUrlFlags
++import mozilla.components.concept.engine.utils.ABOUT_HOME_URL
++import org.mozilla.fenix.HomeActivity
++import org.mozilla.fenix.NavGraphDirections
++import org.mozilla.fenix.R
++import org.mozilla.fenix.components.appstate.AppAction
++import org.mozilla.fenix.components.metrics.MetricsUtils
++import org.mozilla.fenix.ext.components
++import org.mozilla.fenix.ext.openToBrowser
++
++/**
++ * Optional feature "keyboard shortcuts" (`0020-keyboard-shortcuts.patch`): the shortcuts of Chrome and Firefox for
++ * desktop on a physical keyboard (see [keyboardShortcut]). They get the keys before the page, like in Chrome, and are
++ * listed by the keyboard shortcuts helper of Android (Meta+/).
++ *
++ * Ctrl+T opens the new tab through [PatchFeatureHooks.openNewTab], so that it focuses the address bar when the
++ * feature "new tab with the address bar focused" is included.
++ */
++object KeyboardShortcutsFeature : PatchFeatureHooks {
++    private val altKeyTracker = AltKeyTracker()
++
++    override fun onKeyEvent(
++        activity: HomeActivity,
++        event: KeyEvent,
++    ): Boolean {
++        // Not available yet while the activity starts.
++        val navController = runCatching { activity.findNavController(R.id.container) }.getOrNull() ?: return false
++        val isOnBrowserOrHome = navController.currentDestination?.id in setOf(R.id.browserFragment, R.id.homeFragment)
++
++        val isAltReleasedAlone =
++            altKeyTracker.isAltReleasedAlone(
++                keyCode = event.keyCode,
++                action = event.action,
++                metaState = event.metaState,
++                downTime = event.downTime,
++                repeatCount = event.repeatCount,
++            )
++        if (isAltReleasedAlone && isOnBrowserOrHome) {
++            perform(activity, navController, KeyboardShortcut.OpenMenu)
++            return true
++        }
++
++        val shortcut = keyboardShortcut(event.keyCode, event.metaState) ?: return false
++        if (!isOnBrowserOrHome && !shortcut.worksEverywhere) return false
++        // The release of the keys is consumed too, so that the page doesn't get half a shortcut.
++        if (event.action == KeyEvent.ACTION_DOWN && (event.repeatCount == 0 || shortcut.repeats)) {
++            perform(activity, navController, shortcut)
++        }
++        return true
++    }
++
++    override fun keyboardShortcuts(context: Context): List<KeyboardShortcutInfo> {
++        fun shortcut(
++            label: Int,
++            keyCode: Int,
++            modifiers: Int = KeyEvent.META_CTRL_ON,
++        ) = KeyboardShortcutInfo(context.getString(label), keyCode, modifiers)
++        val ctrlShift = KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON
++        val alt = KeyEvent.META_ALT_ON
++        return listOf(
++            shortcut(R.string.home_screen_shortcut_open_new_tab_2, KeyEvent.KEYCODE_T),
++            shortcut(R.string.close_tab, KeyEvent.KEYCODE_W),
++            shortcut(R.string.keyboard_shortcut_reopen_closed_tab, KeyEvent.KEYCODE_T, ctrlShift),
++            shortcut(R.string.keyboard_shortcut_next_tab, KeyEvent.KEYCODE_TAB),
++            shortcut(R.string.keyboard_shortcut_previous_tab, KeyEvent.KEYCODE_TAB, ctrlShift),
++            shortcut(R.string.keyboard_shortcut_first_tabs, KeyEvent.KEYCODE_1),
++            shortcut(R.string.keyboard_shortcut_last_tab, KeyEvent.KEYCODE_9),
++            shortcut(R.string.keyboard_shortcut_address_bar, KeyEvent.KEYCODE_L),
++            shortcut(R.string.browser_menu_refresh, KeyEvent.KEYCODE_R),
++            shortcut(R.string.keyboard_shortcut_reload_bypassing_cache, KeyEvent.KEYCODE_R, ctrlShift),
++            shortcut(R.string.browser_menu_back, KeyEvent.KEYCODE_DPAD_LEFT, alt),
++            shortcut(R.string.browser_menu_forward, KeyEvent.KEYCODE_DPAD_RIGHT, alt),
++            shortcut(R.string.browser_menu_find_in_page, KeyEvent.KEYCODE_F),
++            shortcut(R.string.browser_menu_bookmark_this_page_2, KeyEvent.KEYCODE_D),
++            shortcut(R.string.keyboard_shortcut_menu, KeyEvent.KEYCODE_F10, 0),
++            KeyboardShortcutInfo(
++                context.getString(
++                    R.string.browser_menu_delete_browsing_data_on_quit,
++                    context.getString(R.string.app_name),
++                ),
++                KeyEvent.KEYCODE_Q,
++                KeyEvent.META_CTRL_ON,
++            ),
++        )
++    }
++
++    @Suppress("CyclomaticComplexMethod", "LongMethod")
++    private fun perform(
++        activity: HomeActivity,
++        navController: NavController,
++        shortcut: KeyboardShortcut,
++    ) {
++        val components = activity.components
++        val store = components.core.store
++        val selectedTab = store.state.selectedTab
++        val isOnBrowser = navController.currentDestination?.id == R.id.browserFragment
++        when (shortcut) {
++            KeyboardShortcut.NewTab ->
++                if (!PatchFeatureHooks.newTabOpened(activity)) openNewTabLikeFirefox(activity, navController)
++
++            KeyboardShortcut.CloseTab -> {
++                val tab = selectedTab ?: return
++                val isLastTab = store.state.getNormalOrPrivateTabs(tab.content.private).size == 1
++                components.useCases.tabsUseCases.removeTab(tab.id)
++                if (isLastTab && isOnBrowser) navController.navigate(NavGraphDirections.actionGlobalHome())
++            }
++
++            KeyboardShortcut.ReopenClosedTab -> reopenClosedTab(activity, navController)
++
++            KeyboardShortcut.NextTab,
++            KeyboardShortcut.PreviousTab,
++            is KeyboardShortcut.SelectTab,
++            KeyboardShortcut.LastTab,
++            -> {
++                val isPrivate = selectedTab?.content?.private ?: activity.browsingModeManager.mode.isPrivate
++                val tabs = store.state.getNormalOrPrivateTabs(isPrivate)
++                val tabId = tabToSelect(shortcut, tabs.map { it.id }, selectedTab?.id) ?: return
++                components.useCases.tabsUseCases.selectTab(tabId)
++                // On the browser, selecting a tab showing the homepage shows the homepage (AboutHomeBinding).
++                if (tabs.first { it.id == tabId }.content.url != ABOUT_HOME_URL) navController.openToBrowser()
++            }
++
++            KeyboardShortcut.FocusAddressBar ->
++                navController.navigate(
++                    NavGraphDirections.actionGlobalHome(
++                        focusOnAddressBar = true,
++                        // Like tapping the address bar of a page: edits its address.
++                        sessionToStartSearchFor = if (isOnBrowser) selectedTab?.id else null,
++                    ),
++                )
++
++            KeyboardShortcut.Reload -> selectedTab?.let { components.useCases.sessionUseCases.reload(it.id) }
++
++            KeyboardShortcut.ReloadBypassingCache ->
++                selectedTab?.let {
++                    components.useCases.sessionUseCases.reload(it.id, LoadUrlFlags.select(LoadUrlFlags.BYPASS_CACHE))
++                }
++
++            KeyboardShortcut.Back ->
++                selectedTab?.takeIf { it.content.canGoBack }?.let { components.useCases.sessionUseCases.goBack(it.id) }
++
++            KeyboardShortcut.Forward ->
++                selectedTab?.takeIf { it.content.canGoForward }?.let {
++                    components.useCases.sessionUseCases.goForward(it.id)
++                }
++
++            KeyboardShortcut.FindInPage ->
++                if (isOnBrowser) components.appStore.dispatch(AppAction.FindInPageAction.FindInPageStarted)
++
++            KeyboardShortcut.Bookmark -> {
++                val tab = selectedTab?.takeIf { isOnBrowser } ?: return
++                // Like the bookmark button of the toolbar, which shows the "Bookmark saved" message.
++                activity.lifecycleScope.launch(Dispatchers.IO) {
++                    val result = components.useCases.bookmarksUseCases.addBookmark(tab.content.url, tab.content.title)
++                    components.appStore.dispatch(
++                        AppAction.BookmarkAction.BookmarkAdded(
++                            guidToEdit = result.guidToEdit,
++                            parentNode = result.parentNode,
++                            source = MetricsUtils.BookmarkAction.Source.BROWSER_TOOLBAR,
++                        ),
++                    )
++                }
++            }
++
++            // Like the menu key of the keyboard.
++            KeyboardShortcut.OpenMenu ->
++                activity.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MENU))
++
++            // Closes Firefox without asking: the tabs are there the next time it opens.
++            KeyboardShortcut.Quit -> activity.finishAndRemoveTask()
++        }
++    }
++
++    /** Opens a new tab like the new tab button of the tab strip does in Firefox. */
++    private fun openNewTabLikeFirefox(
++        activity: HomeActivity,
++        navController: NavController,
++    ) {
++        val settings = activity.components.settings
++        if (settings.enableHomepageAsNewTab) {
++            activity.components.useCases.fenixBrowserUseCases.addNewHomepageTab(
++                private = activity.browsingModeManager.mode.isPrivate,
++            )
++        } else {
++            navController.navigate(
++                NavGraphDirections.actionGlobalHome(focusOnAddressBar = !settings.enableHomepageTrendingRecentSearch),
++            )
++        }
++    }
++
++    /**
++     * Reopens the last closed tab: the tabs that can still be restored with "Undo" (private ones too), otherwise the
++     * last tab of the recently closed tabs (like History → Recently closed tabs, only for normal tabs).
++     */
++    private fun reopenClosedTab(
++        activity: HomeActivity,
++        navController: NavController,
++    ) {
++        val components = activity.components
++        val store = components.core.store
++        if (store.state.undoHistory.tabs.isNotEmpty()) {
++            components.useCases.tabsUseCases.undo()
++            return
++        }
++        if (activity.browsingModeManager.mode.isPrivate) return
++        val tab = store.state.closedTabs.maxByOrNull { it.lastAccess } ?: return
++        activity.lifecycleScope.launch {
++            val engineStateStorage = components.core.recentlyClosedTabsStorage.value.engineStateStorage()
++            components.useCases.tabsUseCases.restore(tab, engineStateStorage)
++            store.dispatch(RecentlyClosedAction.RemoveClosedTabAction(tab))
++            navController.openToBrowser()
++        }
++    }
++}
+diff --git a/mobile/android/fenix/app/src/main/res/values-it/keyboard_shortcuts_strings.xml b/mobile/android/fenix/app/src/main/res/values-it/keyboard_shortcuts_strings.xml
+new file mode 100644
+index 00000000..61f58152
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/res/values-it/keyboard_shortcuts_strings.xml
+@@ -0,0 +1,14 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++<resources>
++    <string name="keyboard_shortcut_reopen_closed_tab">Riapri la scheda chiusa</string>
++    <string name="keyboard_shortcut_next_tab">Scheda successiva</string>
++    <string name="keyboard_shortcut_previous_tab">Scheda precedente</string>
++    <string name="keyboard_shortcut_first_tabs">Schede da 1 a 8 (Ctrl+1…8)</string>
++    <string name="keyboard_shortcut_last_tab">Ultima scheda</string>
++    <string name="keyboard_shortcut_address_bar">Barra degli indirizzi</string>
++    <string name="keyboard_shortcut_reload_bypassing_cache">Aggiorna ignorando la cache</string>
++    <string name="keyboard_shortcut_menu">Menu (anche Alt)</string>
++</resources>
+diff --git a/mobile/android/fenix/app/src/main/res/values/keyboard_shortcuts_strings.xml b/mobile/android/fenix/app/src/main/res/values/keyboard_shortcuts_strings.xml
+new file mode 100644
+index 00000000..63bf8d8f
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/res/values/keyboard_shortcuts_strings.xml
+@@ -0,0 +1,24 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++<!-- Keyboard shortcuts of the patch with the Chrome-like tab strip, listed by the keyboard shortcuts helper of Android
++     (Meta+/). Only translated in Italian. -->
++<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
++    <!-- Keyboard shortcut reopening the last closed tab (Ctrl+Shift+T). -->
++    <string name="keyboard_shortcut_reopen_closed_tab">Reopen closed tab</string>
++    <!-- Keyboard shortcut selecting the next tab (Ctrl+Tab). -->
++    <string name="keyboard_shortcut_next_tab">Next tab</string>
++    <!-- Keyboard shortcut selecting the previous tab (Ctrl+Shift+Tab). -->
++    <string name="keyboard_shortcut_previous_tab">Previous tab</string>
++    <!-- Keyboard shortcuts selecting one of the first 8 tabs (Ctrl+1 to Ctrl+8). -->
++    <string name="keyboard_shortcut_first_tabs">Tabs 1 to 8 (Ctrl+1 to 8)</string>
++    <!-- Keyboard shortcut selecting the last tab (Ctrl+9). -->
++    <string name="keyboard_shortcut_last_tab">Last tab</string>
++    <!-- Keyboard shortcut focusing the address bar (Ctrl+L). -->
++    <string name="keyboard_shortcut_address_bar">Address bar</string>
++    <!-- Keyboard shortcut reloading the page without its cached files (Ctrl+Shift+R). -->
++    <string name="keyboard_shortcut_reload_bypassing_cache">Reload ignoring the cache</string>
++    <!-- Keyboard shortcut opening the main menu (F10, or the Alt key alone). -->
++    <string name="keyboard_shortcut_menu">Menu (also Alt)</string>
++</resources>
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/KeyboardShortcutsTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/KeyboardShortcutsTest.kt
+new file mode 100644
+index 00000000..831c3008
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/KeyboardShortcutsTest.kt
+@@ -0,0 +1,137 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import android.view.KeyEvent
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++private const val CTRL = KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
++private const val SHIFT = KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON
++private const val ALT = KeyEvent.META_ALT_ON or KeyEvent.META_ALT_LEFT_ON
++private const val ALT_GR = KeyEvent.META_ALT_ON or KeyEvent.META_ALT_RIGHT_ON
++
++class KeyboardShortcutsTest {
++    @Test
++    fun `WHEN keys are pressed with Ctrl THEN they are the shortcuts of Chrome`() {
++        assertEquals(KeyboardShortcut.NewTab, keyboardShortcut(KeyEvent.KEYCODE_T, CTRL))
++        assertEquals(KeyboardShortcut.CloseTab, keyboardShortcut(KeyEvent.KEYCODE_W, CTRL))
++        assertEquals(KeyboardShortcut.CloseTab, keyboardShortcut(KeyEvent.KEYCODE_F4, CTRL))
++        assertEquals(KeyboardShortcut.NextTab, keyboardShortcut(KeyEvent.KEYCODE_TAB, CTRL))
++        assertEquals(KeyboardShortcut.NextTab, keyboardShortcut(KeyEvent.KEYCODE_PAGE_DOWN, CTRL))
++        assertEquals(KeyboardShortcut.PreviousTab, keyboardShortcut(KeyEvent.KEYCODE_PAGE_UP, CTRL))
++        assertEquals(KeyboardShortcut.SelectTab(0), keyboardShortcut(KeyEvent.KEYCODE_1, CTRL))
++        assertEquals(KeyboardShortcut.SelectTab(7), keyboardShortcut(KeyEvent.KEYCODE_8, CTRL))
++        assertEquals(KeyboardShortcut.LastTab, keyboardShortcut(KeyEvent.KEYCODE_9, CTRL))
++        assertEquals(KeyboardShortcut.FocusAddressBar, keyboardShortcut(KeyEvent.KEYCODE_L, CTRL))
++        assertEquals(KeyboardShortcut.Reload, keyboardShortcut(KeyEvent.KEYCODE_R, CTRL))
++        assertEquals(KeyboardShortcut.ReloadBypassingCache, keyboardShortcut(KeyEvent.KEYCODE_F5, CTRL))
++        assertEquals(KeyboardShortcut.FindInPage, keyboardShortcut(KeyEvent.KEYCODE_F, CTRL))
++        assertEquals(KeyboardShortcut.Bookmark, keyboardShortcut(KeyEvent.KEYCODE_D, CTRL))
++        assertEquals(KeyboardShortcut.Quit, keyboardShortcut(KeyEvent.KEYCODE_Q, CTRL))
++        assertNull(keyboardShortcut(KeyEvent.KEYCODE_N, CTRL))
++        assertNull(keyboardShortcut(KeyEvent.KEYCODE_0, CTRL))
++    }
++
++    @Test
++    fun `WHEN keys are pressed with Ctrl and Shift THEN they are the shortcuts of Chrome`() {
++        assertEquals(KeyboardShortcut.ReopenClosedTab, keyboardShortcut(KeyEvent.KEYCODE_T, CTRL or SHIFT))
++        assertEquals(KeyboardShortcut.PreviousTab, keyboardShortcut(KeyEvent.KEYCODE_TAB, CTRL or SHIFT))
++        assertEquals(KeyboardShortcut.ReloadBypassingCache, keyboardShortcut(KeyEvent.KEYCODE_R, CTRL or SHIFT))
++        assertNull(keyboardShortcut(KeyEvent.KEYCODE_W, CTRL or SHIFT))
++    }
++
++    @Test
++    fun `WHEN keys are pressed with Alt or alone THEN they are the shortcuts of Chrome`() {
++        assertEquals(KeyboardShortcut.FocusAddressBar, keyboardShortcut(KeyEvent.KEYCODE_D, ALT))
++        assertEquals(KeyboardShortcut.Back, keyboardShortcut(KeyEvent.KEYCODE_DPAD_LEFT, ALT))
++        assertEquals(KeyboardShortcut.Forward, keyboardShortcut(KeyEvent.KEYCODE_DPAD_RIGHT, ALT))
++        assertEquals(KeyboardShortcut.Reload, keyboardShortcut(KeyEvent.KEYCODE_F5, 0))
++        assertEquals(KeyboardShortcut.FocusAddressBar, keyboardShortcut(KeyEvent.KEYCODE_F6, 0))
++        assertEquals(KeyboardShortcut.OpenMenu, keyboardShortcut(KeyEvent.KEYCODE_F10, 0))
++        // Typing isn't a shortcut.
++        assertNull(keyboardShortcut(KeyEvent.KEYCODE_T, 0))
++        assertNull(keyboardShortcut(KeyEvent.KEYCODE_T, SHIFT))
++        assertNull(keyboardShortcut(KeyEvent.KEYCODE_DPAD_LEFT, 0))
++    }
++
++    @Test
++    fun `WHEN keys are pressed with AltGr or Meta THEN they aren't shortcuts`() {
++        // AltGr types characters like @ or [ on many layouts.
++        assertNull(keyboardShortcut(KeyEvent.KEYCODE_D, ALT_GR))
++        assertNull(keyboardShortcut(KeyEvent.KEYCODE_T, CTRL or ALT_GR))
++        assertNull(keyboardShortcut(KeyEvent.KEYCODE_T, CTRL or KeyEvent.META_META_ON))
++        assertNull(keyboardShortcut(KeyEvent.KEYCODE_T, CTRL or ALT))
++    }
++
++    @Test
++    fun `WHEN switching tabs THEN the tabs are cycled in the order of the tab strip`() {
++        val tabs = listOf("a", "b", "c")
++
++        assertEquals("b", tabToSelect(KeyboardShortcut.NextTab, tabs, "a"))
++        assertEquals("a", tabToSelect(KeyboardShortcut.NextTab, tabs, "c"))
++        assertEquals("c", tabToSelect(KeyboardShortcut.PreviousTab, tabs, "a"))
++        assertEquals("a", tabToSelect(KeyboardShortcut.PreviousTab, tabs, "b"))
++        // No tab of the strip is selected, e.g. on the homepage.
++        assertEquals("a", tabToSelect(KeyboardShortcut.NextTab, tabs, null))
++        assertEquals("c", tabToSelect(KeyboardShortcut.PreviousTab, tabs, null))
++    }
++
++    @Test
++    fun `WHEN selecting a tab by position THEN only existing tabs are selected`() {
++        val tabs = listOf("a", "b", "c")
++
++        assertEquals("a", tabToSelect(KeyboardShortcut.SelectTab(0), tabs, "c"))
++        assertEquals("c", tabToSelect(KeyboardShortcut.SelectTab(2), tabs, "a"))
++        assertNull(tabToSelect(KeyboardShortcut.SelectTab(5), tabs, "a"))
++        assertEquals("c", tabToSelect(KeyboardShortcut.LastTab, tabs, "a"))
++        assertNull(tabToSelect(KeyboardShortcut.NextTab, emptyList(), null))
++        assertNull(tabToSelect(KeyboardShortcut.Reload, tabs, "a"))
++    }
++
++    @Test
++    fun `WHEN the left Alt key is pressed and released alone THEN it opens the menu`() {
++        val tracker = AltKeyTracker()
++
++        assertFalse(tracker.event(KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.ACTION_DOWN, ALT, downTime = 1))
++        assertTrue(tracker.event(KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.ACTION_UP, 0, downTime = 1))
++    }
++
++    @Test
++    fun `WHEN the left Alt key is used with another key THEN it doesn't open the menu`() {
++        val tracker = AltKeyTracker()
++
++        // Alt+D.
++        tracker.event(KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.ACTION_DOWN, ALT, downTime = 1)
++        tracker.event(KeyEvent.KEYCODE_D, KeyEvent.ACTION_DOWN, ALT, downTime = 2)
++        assertFalse(tracker.event(KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.ACTION_UP, 0, downTime = 1))
++
++        // Ctrl+Alt.
++        tracker.event(KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.ACTION_DOWN, ALT or CTRL, downTime = 3)
++        assertFalse(tracker.event(KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.ACTION_UP, CTRL, downTime = 3))
++
++        // Back to this window with Alt+Tab: Alt was pressed in another window.
++        assertFalse(tracker.event(KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.ACTION_UP, 0, downTime = 4))
++
++        // AltGr.
++        tracker.event(KeyEvent.KEYCODE_ALT_RIGHT, KeyEvent.ACTION_DOWN, ALT_GR, downTime = 5)
++        assertFalse(tracker.event(KeyEvent.KEYCODE_ALT_RIGHT, KeyEvent.ACTION_UP, 0, downTime = 5))
++    }
++
++    @Test
++    fun `GIVEN the patch of the feature is applied THEN the feature gets the keys`() {
++        assertTrue(KeyboardShortcutsFeature in PatchFeatureHooks.all)
++    }
++
++    private fun AltKeyTracker.event(
++        keyCode: Int,
++        action: Int,
++        metaState: Int,
++        downTime: Long,
++    ) = isAltReleasedAlone(keyCode, action, metaState, downTime, repeatCount = 0)
++}
