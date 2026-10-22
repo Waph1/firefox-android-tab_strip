@@ -1,8 +1,11 @@
 # Firefox per Android con la tab strip in stile Chrome (vedi chrome-tabstrip/README.md).
 #
 # - Ogni giorno: controlla l'ultima versione stabile di Firefox per Android; se non è ancora stata pubblicata
-#   nelle Release di questo repository, applica la patch, compila l'APK e lo pubblica come nuova Release.
-# - A ogni push che modifica la patch o gli script: verifica che la patch si applichi ancora.
+#   nelle Release di questo repository, applica le patch, compila l'APK e lo pubblica come nuova Release.
+#   Le patch facoltative che non si applicano o non compilano vengono saltate: la Release esce lo stesso, dice
+#   quali funzioni mancano e l'esecuzione finisce in errore (così arriva l'e-mail di GitHub). Una Release
+#   incompleta viene ricompilata quando le patch cambiano.
+# - A ogni push che modifica le patch o gli script: verifica che le patch si applichino ancora.
 # - A mano (Actions → Chrome-like tab strip → Run workflow): stesse operazioni, con qualche opzione in più.
 #
 # Gli APK pubblicati sono firmati con una chiave salvata cifrata nel repository: serve il secret
@@ -41,7 +44,7 @@ permissions:
 
 jobs:
   check:
-    name: La patch si applica?
+    name: Le patch si applicano?
     runs-on: ubuntu-latest
     env:
       FIREFOX_VERSION: ${{ inputs.version || 'stable' }}
@@ -51,7 +54,9 @@ jobs:
       - name: Scarica Fenix (solo mobile/android/fenix)
         run: chrome-tabstrip/scripts/fetch-firefox.sh "$RUNNER_TEMP/firefox" --fenix
 
-      - name: Verifica la patch
+      - name: Verifica le patch
+        # Fallisce se non si applica una patch obbligatoria o se le facoltative non si applicano tutte insieme; per
+        # una facoltativa che non si applica dà solo un avviso (la Release esce senza quella funzione).
         run: chrome-tabstrip/scripts/apply.sh "$RUNNER_TEMP/firefox" --check
 
   build:
@@ -122,13 +127,14 @@ jobs:
           chrome-tabstrip/scripts/fetch-firefox.sh "$WORK/firefox"
           echo "FX_VERSION=$(cat "$WORK/firefox/mobile/android/version.txt")" >> "$GITHUB_ENV"
 
-      - name: Applica la patch
+      - name: Applica le patch
         if: ${{ steps.plan.outputs.build == 'true' }}
-        run: chrome-tabstrip/scripts/apply.sh "$WORK/firefox"
+        run: chrome-tabstrip/scripts/apply.sh "$WORK/firefox" --best-effort
 
       - name: Compila
+        # Se una patch facoltativa non compila, la toglie e ricompila.
         if: ${{ steps.plan.outputs.build == 'true' }}
-        run: chrome-tabstrip/scripts/build.sh "$WORK/firefox" "$VARIANT"
+        run: chrome-tabstrip/scripts/ci-build.sh "$WORK/firefox" "$VARIANT"
 
       - name: Prepara l'APK
         if: ${{ steps.plan.outputs.build == 'true' }}
@@ -153,7 +159,8 @@ jobs:
         run: |
           UPDATE_INFO="$RUNNER_TEMP/update.json"
           chrome-tabstrip/scripts/ci-update-info.sh "$APK" \
-            "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$(basename "$APK")" > "$UPDATE_INFO"
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$(basename "$APK")" "$WORK/firefox" \
+            > "$UPDATE_INFO"
           cat "$UPDATE_INFO"
           echo "UPDATE_INFO=$UPDATE_INFO" >> "$GITHUB_ENV"
 
@@ -162,21 +169,8 @@ jobs:
         env:
           TAG: ${{ steps.plan.outputs.tag }}
         run: |
-          cat > "$RUNNER_TEMP/notes.md" <<EOF
-          Firefox per Android **$FX_VERSION** (versione stabile) con la tab strip in stile Chrome, che compare e
-          scompare aprendo e chiudendo il telefono pieghevole, e con i siti che passano dalla versione desktop
-          (telefono aperto) a quella mobile (telefono chiuso).
-
-          **Come installarlo dal telefono**
-          1. Scarica qui sotto il file \`$(basename "$APK")\`.
-          2. Aprilo e consenti l'installazione di app da questa fonte se Android lo chiede.
-          3. Se hai il Firefox del Play Store, va prima disinstallato (firma diversa): sincronizza prima i dati
-             con il tuo account Mozilla. Gli aggiornamenti successivi pubblicati qui si installano sopra questo.
-          4. Una volta al giorno Firefox controlla se qui c'è una versione nuova e propone di installarla: la prima
-             volta Android chiede di consentire a Firefox di installare app.
-
-          Patch: [chrome-tabstrip](https://github.com/$GITHUB_REPOSITORY/tree/$GITHUB_SHA/chrome-tabstrip)
-          EOF
+          chrome-tabstrip/scripts/ci-release-notes.sh "$UPDATE_INFO" "$(basename "$APK")" "$FX_VERSION" \
+            > "$RUNNER_TEMP/notes.md"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release delete "$TAG" --yes --cleanup-tag
           fi
@@ -193,3 +187,18 @@ jobs:
             ${{ env.APK }}
             ${{ env.UPDATE_INFO }}
           if-no-files-found: error
+
+      - name: Funzioni mancanti?
+        # Dopo aver pubblicato: se mancano funzioni facoltative, l'esecuzione finisce in errore e GitHub manda
+        # l'e-mail che avvisa di aggiornare le patch.
+        if: ${{ steps.plan.outputs.build == 'true' }}
+        run: |
+          MISSING="$(python3 -c 'import json, sys
+          print("\n".join("- " + f["name"]["it"] for f in json.load(open(sys.argv[1]))["missingFeatures"]))' "$UPDATE_INFO")"
+          if [ -n "$MISSING" ]; then
+            { echo "⚠️ Questa versione non include alcune funzioni della patch, che vanno aggiornate:"; echo "$MISSING"; } \
+              >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Mancano funzioni della patch: $(echo "$MISSING" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "✅ Tutte le funzioni della patch sono incluse." >> "$GITHUB_STEP_SUMMARY"

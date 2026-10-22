@@ -1,14 +1,16 @@
 # Tab strip in stile Chrome per Firefox Android
 
-Questa cartella contiene una **patch** per il sorgente ufficiale di Firefox per Android (Fenix) che rende la
+Questa cartella contiene delle **patch** per il sorgente ufficiale di Firefox per Android (Fenix) che rendono la
 barra delle schede (tab strip) uguale, nel comportamento, a quella di **Chrome per Android**, e la fa
 **comparire e sparire in tempo reale** quando si apre o si chiude un pieghevole come il **Samsung Galaxy Z Fold**.
 Allo stesso modo i siti passano **al volo** dalla versione desktop (telefono aperto) a quella mobile (telefono chiuso)
 e la status bar sparisce a telefono aperto, con le schede a filo del bordo superiore, per tornare a telefono chiuso.
 
-La patch è pensata per essere **riapplicata a ogni aggiornamento di Firefox**: quasi tutto il codice sta in file
+Le patch sono pensate per essere **riapplicate a ogni aggiornamento di Firefox**: quasi tutto il codice sta in file
 nuovi e le modifiche ai file esistenti sono poche righe, così i conflitti con le nuove versioni di Firefox sono rari
-e, quando capitano, facili da risolvere.
+e, quando capitano, facili da risolvere. Le funzioni aggiuntive hanno ognuna la propria patch **facoltativa**: se un
+aggiornamento di Firefox ne rompe una, la nuova versione esce lo stesso senza quella funzione, e te lo dice (vedi
+«Patch obbligatorie e facoltative»). Le funzioni in programma sono descritte in [`PIANO.md`](PIANO.md).
 
 > ⚠️ Il codice di Firefox per Android non vive più in questo repository (archiviato nel 2024, fermo a Firefox 125),
 > ma in [`mozilla-firefox/firefox`](https://github.com/mozilla-firefox/firefox) sotto `mobile/android/`. La patch va
@@ -38,9 +40,10 @@ Release. Per installarla dal telefono: apri la Release, scarica il file `.apk`, 
 Il Firefox del Play Store va prima disinstallato (ha una firma diversa): sincronizza prima i dati con il tuo account
 Mozilla. Gli aggiornamenti successivi si installano **dall'app stessa** (vedi «Aggiornamenti dall'app»).
 
-Se una nuova versione di Firefox cambia il codice toccato dalla patch, la compilazione fallisce e GitHub ti manda
-un'e-mail: la patch va aggiornata (vedi «Quando esce una nuova versione di Firefox»), finché resta disponibile
-l'ultima Release funzionante.
+Se una nuova versione di Firefox cambia il codice toccato da una patch, GitHub ti manda un'e-mail: la patch va
+aggiornata (vedi «Quando esce una nuova versione di Firefox»). Se è una patch obbligatoria la compilazione fallisce e
+resta disponibile l'ultima Release funzionante; se è facoltativa la nuova Release esce lo stesso, senza quella
+funzione, e l'app te lo dice prima di aggiornare.
 
 ## Cosa cambia
 
@@ -136,6 +139,10 @@ Upstream, invece, la status bar è sempre visibile e la tab strip parte sotto di
 - **Pulsante navigazione privata** in fondo alla strip (come il selettore "Incognito" di Chrome) quando esistono
   schede dell'altra modalità: un tocco passa all'ultima scheda usata dell'altra modalità.
 - **Titoli sfumati** alla fine invece che troncati, altezza della strip di **40dp** come in Chrome.
+- **Menu della scheda**: tenendo premuta una scheda si apre il suo menu, come in Chrome: **Aggiorna**, **Chiudi
+  scheda**, **Chiudi le altre schede** (quelle normali o private, come la scheda; compare il messaggio con
+  **Annulla**) e le voci delle funzioni facoltative. Se invece la scheda viene trascinata, il menu si chiude e la
+  scheda si sposta.
 - Restano: trascinamento con pressione prolungata per riordinare, scroll automatico alla scheda selezionata/nuova,
   accessibilità (azione "Chiudi scheda" per TalkBack).
 
@@ -156,7 +163,16 @@ Gli APK pubblicati nelle Release si aggiornano da soli, come le app installate f
 - per controllare subito, senza aspettare il giorno dopo: **Impostazioni → Informazioni su Firefox → Cerca
   aggiornamenti** (dice anche se Firefox è già aggiornato o se questa versione non si aggiorna da GitHub);
 - la prima volta Android chiede di **consentire a Firefox di installare app** (Impostazioni → Installa app
-  sconosciute): basta attivare l'interruttore e tornare indietro.
+  sconosciute): basta attivare l'interruttore e tornare indietro;
+- se nella nuova versione **mancano funzioni facoltative** (la loro patch non si applica ancora alla nuova versione
+  di Firefox), la finestra lo dice: in evidenza quelle che hai nella versione installata e che perderesti
+  aggiornando, poi le altre. Così decidi subito se aggiornare o aspettare la versione corretta; con **Salta questa
+  versione** il controllo giornaliero non la propone più (te la mostra solo «Cerca aggiornamenti») e propone la
+  prossima, anche la stessa versione di Firefox ricompilata con la patch sistemata, che ripristina le funzioni
+  («Questa versione ripristina: …»);
+- **Impostazioni → Informazioni su Firefox → Funzioni della patch** elenca le funzioni facoltative incluse nella
+  versione installata e quelle mancanti (con ⚠️ se ne manca qualcuna). La voce compare quando esiste almeno una
+  funzione facoltativa.
 
 Le build compilate sul computer (firmate con un'altra chiave) e le varianti `nightly`/`debug` non propongono mai
 aggiornamenti. Chi usa un fork con le proprie Release deve cambiare `UPDATE_INFO_URL` in `SelfUpdater.kt`.
@@ -171,6 +187,43 @@ indica il commit di Firefox su cui la patch è stata verificata l'ultima volta.
 Per provare un'altra versione basta la variabile `FIREFOX_VERSION`: `beta`, `main` (Nightly) o un tag preciso, ad es.
 `FIREFOX_VERSION=FIREFOX-ANDROID_158_0_RELEASE chrome-tabstrip/scripts/fetch-firefox.sh ~/firefox`.
 
+## Patch obbligatorie e facoltative
+
+Le patch sono in [`patches/`](patches) ed elencate, nell'ordine, in [`patches/series`](patches/series), con il nome
+della funzione in italiano e in inglese (quello che compare nell'app e nelle Release):
+
+- **obbligatorie**: `0001` (tab strip, siti desktop/mobile, status bar, aggiornamenti dall'app) e `0002`
+  (funzioni facoltative e menu delle schede). Se non si applicano o non compilano, la compilazione su GitHub
+  fallisce e resta disponibile l'ultima Release buona;
+- **facoltative**: una per funzione. Su GitHub, quelle che non si applicano o non compilano vengono **saltate**: la
+  Release esce lo stesso, ne elenca le funzioni mancanti e l'app lo dice prima di aggiornare.
+
+Regole per le patch facoltative, che permettono di saltarne una senza toccare le altre:
+
+- ognuna si applica e compila **sopra le sole patch obbligatorie**, qualunque altra facoltativa manchi; due
+  facoltative non modificano mai le stesse righe (`apply.sh --check` lo verifica);
+- ognuna definisce l'oggetto Kotlin `org.mozilla.fenix.patchfeatures.<Nome>Feature`, dove `<Nome>` viene dal nome del
+  file (es. `0080-tab-groups.patch` → `TabGroupsFeature`), che implementa `PatchFeatureHooks`: è il suo punto di
+  ingresso. Il codice delle patch obbligatorie chiama le funzioni facoltative solo attraverso `PatchFeatureHooks`
+  (es. le voci del menu della scheda); se a una funzione serve un nuovo punto di aggancio, va aggiunto alla `0002`;
+- `apply.sh` scrive in `patchfeatures/GeneratedPatchFeatures.kt` le funzioni incluse e mancanti e l'elenco dei loro
+  oggetti: è generato, non fa parte di nessuna patch e non va modificato.
+
+Per lavorare su una patch, applicala **per ultima** e rigenerala con `refresh.sh`, che rigenera sempre l'ultima
+patch applicata:
+
+```bash
+chrome-tabstrip/scripts/apply.sh ~/firefox tab-groups                 # obbligatorie + solo quella facoltativa
+# ... modifica il codice, compila, prova ...
+chrome-tabstrip/scripts/refresh.sh ~/firefox                          # rigenera patches/0080-tab-groups.patch
+
+chrome-tabstrip/scripts/refresh.sh ~/firefox 0090-nuova-funzione.patch  # crea una patch nuova con le modifiche
+                                                                        # fatte sopra le patch applicate
+chrome-tabstrip/scripts/unapply.sh ~/firefox tab-groups               # toglie solo quella facoltativa
+```
+
+Per modificare una patch obbligatoria, togli prima con `unapply.sh` quelle applicate dopo di lei.
+
 ## Uso rapido
 
 Serve Linux o macOS con `git`, `python3` e circa **25 GB** liberi (sorgente ~6 GB, file di build, cache di Gradle e
@@ -181,7 +234,7 @@ l'"artifact build" (vengono scaricati i binari già compilati da Mozilla per que
 # 1. Scarica il sorgente dell'ultima versione stabile di Firefox — ~6 GB
 chrome-tabstrip/scripts/fetch-firefox.sh ~/firefox
 
-# 2. Applica la patch
+# 2. Applica le patch (tutte; per scegliere le funzioni facoltative: apply.sh ~/firefox tab-groups ...)
 chrome-tabstrip/scripts/apply.sh ~/firefox
 
 # 3. Compila l'APK (prima volta ~30-60 minuti, poi molto meno)
@@ -218,21 +271,22 @@ Android accetta un aggiornamento solo se è firmato con la **stessa chiave** del
 Firefox stabile si aggiorna ogni 4 settimane (più eventuali versioni correttive, es. 157.0.1):
 
 ```bash
-chrome-tabstrip/scripts/unapply.sh ~/firefox        # toglie la patch
+chrome-tabstrip/scripts/unapply.sh ~/firefox        # toglie le patch
 chrome-tabstrip/scripts/fetch-firefox.sh ~/firefox  # passa all'ultima versione stabile
-chrome-tabstrip/scripts/apply.sh ~/firefox          # riapplica la patch
+chrome-tabstrip/scripts/apply.sh ~/firefox          # riapplica le patch
 chrome-tabstrip/scripts/build.sh ~/firefox          # ricompila
 ```
 
-`apply.sh` prova prima ad applicare la patch così com'è e poi, se il codice di Firefox è cambiato attorno alle
-modifiche, con un **merge a 3 vie**. Se restano conflitti:
+`apply.sh` applica le patch nell'ordine di `patches/series`, ognuna prima così com'è e poi, se il codice di Firefox
+è cambiato attorno alle modifiche, con un **merge a 3 vie**. Se restano conflitti, si ferma su quella patch:
 
 1. apri i file elencati e risolvi le parti tra `<<<<<<<` e `>>>>>>>`;
-2. esegui `chrome-tabstrip/scripts/refresh.sh ~/firefox`, che rigenera `patches/*.patch` e aggiorna
-   `UPSTREAM_BASE`;
-3. fai commit della patch aggiornata in questo repository.
+2. esegui `chrome-tabstrip/scripts/refresh.sh ~/firefox`, che rigenera quella patch e aggiorna `UPSTREAM_BASE`;
+3. rilancia `apply.sh ~/firefox` per applicare le patch rimanenti (quelle già applicate restano come sono);
+4. fai commit delle patch aggiornate in questo repository.
 
-Per verificare senza modificare nulla: `chrome-tabstrip/scripts/apply.sh ~/firefox --check`.
+Per verificare senza modificare nulla: `chrome-tabstrip/scripts/apply.sh ~/firefox --check` (le obbligatorie, ogni
+facoltativa da sola sopra le obbligatorie, e tutte insieme).
 
 Per eseguire i test unitari della patch (dopo `build.sh`):
 
@@ -240,17 +294,26 @@ Per eseguire i test unitari della patch (dopo `build.sh`):
 cd ~/firefox
 MOZCONFIG=$PWD/mozconfig-chrome-tabstrip ./mach gradle fenix:testDebugUnitTest \
     --tests 'org.mozilla.fenix.browser.tabstrip.*' --tests 'org.mozilla.fenix.browser.desktopmode.*' \
-    --tests 'org.mozilla.fenix.theme.StatusBarColorManagerTest'
+    --tests 'org.mozilla.fenix.theme.StatusBarColorManagerTest' --tests 'org.mozilla.fenix.selfupdate.*' \
+    --tests 'org.mozilla.fenix.patchfeatures.*'
 ```
 
 ## Automazione con GitHub Actions
 
 Il workflow [`.github/workflows/chrome-tabstrip.yml`](../.github/workflows/chrome-tabstrip.yml):
 
-- **ogni giorno** controlla l'ultima versione stabile di Firefox per Android: se la patch non si applica più, GitHub
-  ti avvisa via e-mail; se si applica e quella versione non è ancora nelle Release, compila l'APK e lo pubblica
-  insieme a `update.json` (versione, firma e indirizzo dell'APK, letti da Firefox per aggiornarsi);
-- a ogni push che modifica la patch o gli script verifica che la patch si applichi;
+- **ogni giorno** controlla l'ultima versione stabile di Firefox per Android: se una patch obbligatoria non si
+  applica più, GitHub ti avvisa via e-mail; altrimenti, se quella versione non è ancora nelle Release, compila l'APK
+  e lo pubblica insieme a `update.json` (versione, firma e indirizzo dell'APK, funzioni incluse e mancanti, letti da
+  Firefox per aggiornarsi);
+- le patch **facoltative** che non si applicano vengono saltate; se una non compila, `ci-build.sh` risale dagli
+  errori alla patch, la toglie e ricompila (al massimo 3 compilazioni; se gli errori non portano a nessuna patch
+  facoltativa, le toglie tutte). La Release esce lo stesso, con l'elenco delle funzioni mancanti, e poi l'esecuzione
+  finisce in errore, così arriva l'e-mail che avvisa di sistemare la patch;
+- una Release con funzioni mancanti viene **ricompilata** (stessa versione di Firefox, `versionCode` più alto, quindi
+  proposta come aggiornamento) appena le patch cambiano, cioè dopo che sono state sistemate; finché restano uguali
+  non si ricompila, così non arriva un'e-mail al giorno;
+- a ogni push che modifica le patch o gli script verifica che le patch si applichino;
 - a mano (**Actions → Chrome-like tab strip → Run workflow**) fa le stesse cose; con *mode = test* compila con una
   chiave temporanea e allega l'APK all'esecuzione invece di pubblicarlo (utile per provare una versione diversa
   con *version*, es. `beta`).
@@ -258,7 +321,9 @@ Il workflow [`.github/workflows/chrome-tabstrip.yml`](../.github/workflows/chrom
 GitHub esegue le attività pianificate solo dal ramo predefinito (`main`) e le sospende dopo 60 giorni senza
 modifiche al repository: in quel caso ti manda un'e-mail e basta riattivarle da **Actions**.
 
-## Cosa tocca la patch
+## Cosa toccano le patch
+
+### `0001`: tab strip, siti desktop/mobile, status bar, aggiornamenti
 
 File nuovi (`mobile/android/fenix/app/src/...`):
 
@@ -298,6 +363,24 @@ Modifiche piccole ai file esistenti:
 - `settings/about/AboutFragment.kt`, `AboutItem.kt` — la voce «Cerca aggiornamenti» in Informazioni su Firefox.
 - `TabStrip.kt` (usa `ChromeStyleTabStripContent`), `TabStripState.kt` (stato di caricamento), `dimens.xml`
   (altezza 40dp), `StatusBarColorManagerTest.kt` (adeguato alle modifiche).
+
+### `0002`: funzioni facoltative e menu delle schede
+
+File nuovi:
+
+- `patchfeatures/PatchFeatures.kt` — le funzioni facoltative incluse e mancanti (`PatchFeatures`), il confronto con
+  quelle di un aggiornamento (`PatchFeatureChanges`) e i punti di aggancio delle funzioni (`PatchFeatureHooks`);
+  `PatchFeaturesDialog.kt` — la voce «Funzioni della patch» di Informazioni su Firefox.
+- `browser/tabstrip/TabStripTabMenu.kt` — il menu della scheda nella tab strip.
+- `res/values/` e `res/values-it/patch_features_strings.xml` — i testi.
+- `test/.../patchfeatures/PatchFeaturesTest.kt`, `test/.../browser/tabstrip/TabStripTabMenuTest.kt` — test unitari.
+
+Modifiche ai file della `0001`: `SelfUpdater.kt` (funzioni mancanti nella finestra dell'aggiornamento, «Salta
+questa versione»), `ChromeStyleTabStrip.kt` (menu con la pressione prolungata), `AboutFragment.kt`, `AboutItem.kt`
+(voce «Funzioni della patch»).
+
+Modifiche piccole ai file esistenti: `TabStrip.kt` (azioni del menu), `BaseBrowserFragment.kt`, `HomeFragment.kt`
+(messaggio «Schede chiuse» con Annulla dopo «Chiudi le altre schede»).
 
 ## Differenze rispetto a Chrome
 

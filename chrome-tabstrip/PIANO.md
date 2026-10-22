@@ -15,7 +15,7 @@ schermo grande" compare e sparisce **al volo** aprendo e chiudendo il telefono, 
 
 | #  | Funzione                                          | Patch                        | Tipo        | Stato        |
 |----|---------------------------------------------------|------------------------------|-------------|--------------|
-| 0  | Patch divise e avviso negli aggiornamenti         | base + `0002`                | obbligatoria | da fare     |
+| 0  | Patch divise e avviso negli aggiornamenti         | base + `0002`                | obbligatoria | fatto       |
 | 1  | Nuova scheda con la barra degli indirizzi attiva  | `0010-new-tab-focus`         | facoltativa | da fare      |
 | 2  | Scorciatoie da tastiera fisica                    | `0020-keyboard-shortcuts`    | facoltativa | da fare      |
 | 3  | Menu ⋮ a tendina                                  | `0030-dropdown-menu`         | facoltativa | da fare      |

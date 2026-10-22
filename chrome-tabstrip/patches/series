@@ -1,0 +1,14 @@
+# Patch da applicare al sorgente di Firefox, nell'ordine.
+#
+# Ogni riga: file | tipo | nome della funzione in italiano | nome in inglese
+#
+# - obbligatoria: se non si applica o non compila, la build fallisce (e resta l'ultima Release buona);
+# - facoltativa: se non si applica o non compila, su GitHub viene saltata e la Release esce senza quella funzione
+#   (lo dicono la Release e la finestra dell'aggiornamento nell'app). Ogni facoltativa deve applicarsi e compilare
+#   sopra le sole obbligatorie e definire l'oggetto Kotlin org.mozilla.fenix.patchfeatures.<Nome>Feature, dove
+#   <Nome> è il nome del file senza numero (es. 0080-tab-groups.patch -> TabGroupsFeature). Vedi il README.
+#
+# I nomi compaiono nell'app e nelle Release.
+
+0001-fenix-chrome-like-adaptive-tab-strip.patch | obbligatoria | Tab strip in stile Chrome | Chrome-like tab strip
+0002-fenix-patch-features.patch                 | obbligatoria | Funzioni facoltative e menu delle schede | Optional features and tab menu

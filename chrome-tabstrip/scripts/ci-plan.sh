@@ -38,10 +38,22 @@ output tag "$TAG"
 info "Ultima versione stabile di Firefox per Android: $VERSION ($REF)"
 
 if gh release view "$TAG" >/dev/null 2>&1 && [ "${FORCE:-false}" != "true" ]; then
-    info "La release $TAG esiste già: niente da fare."
-    summary "✅ Firefox $VERSION con la tab strip è già pubblicato nelle Release."
-    output build false
-    exit 0
+    # Una Release senza alcune funzioni facoltative (le loro patch non si applicavano o non compilavano) viene
+    # ricompilata quando le patch cambiano, cioè dopo che sono state sistemate. Finché restano uguali non si
+    # ricompila, così non arriva un'e-mail ogni giorno.
+    MISSING="$(gh release download "$TAG" --pattern update.json --output - 2>/dev/null |
+        python3 -c 'import json, sys
+info = json.load(sys.stdin)
+if info.get("patchesHash") != sys.argv[1]:
+    print(", ".join(f["name"]["it"] for f in info.get("missingFeatures", [])))' "$(patches_hash)" || true)"
+    if [ -z "$MISSING" ]; then
+        info "La release $TAG esiste già: niente da fare."
+        summary "✅ Firefox $VERSION con la tab strip è già pubblicato nelle Release."
+        output build false
+        exit 0
+    fi
+    info "La release $TAG non include: $MISSING. Le patch sono cambiate: la ricompilo."
+    summary "🔁 Ricompilo Firefox $VERSION: la release pubblicata non include $MISSING e le patch sono cambiate."
 fi
 
 if [ "${HAS_KEY:-false}" != "true" ]; then
