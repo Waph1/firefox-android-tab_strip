@@ -17,7 +17,7 @@ schermo grande" compare e sparisce **al volo** aprendo e chiudendo il telefono, 
 |----|---------------------------------------------------|------------------------------|-------------|--------------|
 | 0  | Patch divise e avviso negli aggiornamenti         | base + `0002`                | obbligatoria | fatto       |
 | 1  | Nuova scheda con la barra degli indirizzi attiva  | `0010-new-tab-focus`         | facoltativa | fatto        |
-| 2  | Scorciatoie da tastiera fisica                    | `0020-keyboard-shortcuts`    | facoltativa | da fare      |
+| 2  | Scorciatoie da tastiera fisica                    | `0020-keyboard-shortcuts`    | facoltativa | fatto        |
 | 3  | Menu ⋮ a tendina                                  | `0030-dropdown-menu`         | facoltativa | da fare      |
 | 4  | Zoom della pagina come su desktop                 | `0040-page-zoom`             | facoltativa | da fare      |
 | 5  | Barra dei segnalibri                              | `0050-bookmarks-bar`         | facoltativa | da fare      |
@@ -151,6 +151,10 @@ per schermo grande.
 
 Limite noto: i siti che usano le stesse combinazioni (ad es. Ctrl+F in un editor online) non le ricevono, perché
 Firefox le prende prima. Se dà fastidio, in seguito si possono lasciare alla pagina le scorciatoie non essenziali.
+
+**Fatto**, con i punti di aggancio `PatchFeatureHooks.onKeyEvent` e `keyboardShortcuts` della `0002`. Da completare
+con le altre funzioni, ognuna nella propria patch: Ctrl + / − / 0 con lo zoom (4), Ctrl+Shift+B con la barra dei
+segnalibri (5), Ctrl+Tab che salta le schede dei gruppi chiusi con i gruppi (8).
 
 ---
 

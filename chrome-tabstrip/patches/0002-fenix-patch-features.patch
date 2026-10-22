@@ -1,3 +1,50 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
+index 78266119..a3df1d98 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
+@@ -20,7 +20,9 @@ import android.text.format.DateUtils
+ import android.util.AttributeSet
+ import android.view.ActionMode
+ import android.view.KeyEvent
++import android.view.KeyboardShortcutGroup
+ import android.view.LayoutInflater
++import android.view.Menu
+ import android.view.MotionEvent
+ import android.view.View
+ import android.view.ViewConfiguration
+@@ -179,6 +181,7 @@ import org.mozilla.fenix.nimbus.FxNimbus
+ import org.mozilla.fenix.onboarding.ensureMarketingChannelExists
+ import org.mozilla.fenix.onboarding.seedOnboardingCompletedTimestampForDebugIfNeeded
+ import org.mozilla.fenix.pbmlock.DefaultPrivateBrowsingLockStorage
++import org.mozilla.fenix.patchfeatures.PatchFeatureHooks
+ import org.mozilla.fenix.pbmlock.PrivateBrowsingLockFeature
+ import org.mozilla.fenix.perf.DefaultStartupPathProvider
+ import org.mozilla.fenix.perf.MarkersActivityLifecycleCallbacks
+@@ -1364,6 +1367,8 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+     }
+ 
+     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
++        // The optional features of the patch get the keys before the page and the rest of Firefox (keyboard shortcuts).
++        if (PatchFeatureHooks.keyEventHandled(this, event)) return true
+         // The KEYCODE_MENU event is handled here instead of onKeyDown or onKeyUp because
+         // after navigating to another fragment like Settings or Bookmarks, and then back this
+         // key event is somehow getting consumed before it reaches onKeyDown or onKeyUp.
+@@ -1391,6 +1396,15 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+         return super.dispatchKeyEvent(event)
+     }
+ 
++    override fun onProvideKeyboardShortcuts(
++        data: MutableList<KeyboardShortcutGroup>?,
++        menu: Menu?,
++        deviceId: Int,
++    ) {
++        super.onProvideKeyboardShortcuts(data, menu, deviceId)
++        PatchFeatureHooks.keyboardShortcutGroup(this)?.let { data?.add(it) }
++    }
++
+     final override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+         // Inspired by
+         // https://searchfox.org/mozilla-esr68/source/mobile/android/base/java/org/mozilla/gecko/BrowserApp.java#584-613
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
 index b8b89301..c0d5d897 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
@@ -337,10 +384,10 @@ index 1312a62f..eb50448e 100644
          }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
 new file mode 100644
-index 00000000..e463b919
+index 00000000..3e3b6283
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
-@@ -0,0 +1,171 @@
+@@ -0,0 +1,206 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -349,11 +396,15 @@ index 00000000..e463b919
 +
 +import android.content.Context
 +import android.content.ContextWrapper
++import android.view.KeyEvent
++import android.view.KeyboardShortcutGroup
++import android.view.KeyboardShortcutInfo
 +import mozilla.components.compose.base.menu.MenuItem
 +import org.json.JSONArray
 +import org.json.JSONException
 +import org.json.JSONObject
 +import org.mozilla.fenix.HomeActivity
++import org.mozilla.fenix.R
 +import java.util.Locale
 +
 +private const val DEFAULT_LANGUAGE = "en"
@@ -481,12 +532,27 @@ index 00000000..e463b919
 +    fun tabStripMenuItems(tab: TabStripMenuTab): List<MenuItem> = emptyList()
 +
 +    /**
-+     * Opens a new tab in place of Firefox, when the new tab button of the tab strip is tapped. Returns whether the
-+     * feature opened it: if no feature does, Firefox opens it as usual.
++     * Opens a new tab in place of Firefox, when the new tab button of the tab strip is tapped (or a keyboard shortcut
++     * asks for a new tab). Returns whether the feature opened it: if no feature does, Firefox opens it as usual.
 +     *
 +     * @param activity The activity showing the tab strip.
 +     */
 +    fun openNewTab(activity: HomeActivity): Boolean = false
++
++    /**
++     * Handles a key event of [activity] before the page and the rest of Firefox, e.g. a keyboard shortcut. Returns
++     * whether the feature handled it.
++     *
++     * @param activity The activity receiving the key event.
++     * @param event The key event.
++     */
++    fun onKeyEvent(
++        activity: HomeActivity,
++        event: KeyEvent,
++    ): Boolean = false
++
++    /** The keyboard shortcuts of the feature, listed by the keyboard shortcuts helper of Android (Meta+/). */
++    fun keyboardShortcuts(context: Context): List<KeyboardShortcutInfo> = emptyList()
 +
 +    companion object {
 +        /** The entry points of the optional features included in this build. */
@@ -502,6 +568,22 @@ index 00000000..e463b919
 +        fun newTabOpened(context: Context): Boolean {
 +            val activity = context.findHomeActivity() ?: return false
 +            return all.any { it.openNewTab(activity) }
++        }
++
++        /** Lets the optional features handle a key event (see [PatchFeatureHooks.onKeyEvent]). */
++        fun keyEventHandled(
++            activity: HomeActivity,
++            event: KeyEvent,
++        ): Boolean = all.any { it.onKeyEvent(activity, event) }
++
++        /**
++         * The keyboard shortcuts of the optional features (see [PatchFeatureHooks.keyboardShortcuts]), grouped under
++         * the name of the app, or `null` if there are none.
++         */
++        fun keyboardShortcutGroup(context: Context): KeyboardShortcutGroup? {
++            val shortcuts = all.flatMap { it.keyboardShortcuts(context) }
++            if (shortcuts.isEmpty()) return null
++            return KeyboardShortcutGroup(context.getString(R.string.app_name), shortcuts)
 +        }
 +    }
 +}
