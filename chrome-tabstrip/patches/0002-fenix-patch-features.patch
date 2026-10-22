@@ -54,10 +54,10 @@ index 78266119..8aaabfe3 100644
          // Inspired by
          // https://searchfox.org/mozilla-esr68/source/mobile/android/base/java/org/mozilla/gecko/BrowserApp.java#584-613
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
-index b8b89301..c0d5d897 100644
+index b8b89301..952ab026 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
-@@ -227,6 +227,7 @@ import org.mozilla.fenix.ext.requireComponents
+@@ -227,11 +227,13 @@ import org.mozilla.fenix.ext.requireComponents
  import org.mozilla.fenix.ext.runIfFragmentIsAttached
  import org.mozilla.fenix.ext.secure
  import org.mozilla.fenix.ext.tabClosedUndoMessage
@@ -65,7 +65,25 @@ index b8b89301..c0d5d897 100644
  import org.mozilla.fenix.ext.updateMicrosurveyPromptForConfigurationChange
  import org.mozilla.fenix.messaging.FenixMessageSurfaceId
  import org.mozilla.fenix.messaging.MessagingFeature
-@@ -1598,6 +1599,7 @@ abstract class BaseBrowserFragment :
+ import org.mozilla.fenix.microsurvey.ui.MicrosurveyRequestPrompt
+ import org.mozilla.fenix.nimbus.FxNimbus
++import org.mozilla.fenix.patchfeatures.PatchFeatureHooks
+ import org.mozilla.fenix.pbmlock.BlackScreenOverlay
+ import org.mozilla.fenix.pbmlock.NavigationOrigin
+ import org.mozilla.fenix.pbmlock.observePrivateModeLock
+@@ -1468,6 +1470,11 @@ abstract class BaseBrowserFragment :
+             topToolbarHeight = getTopToolbarHeight(includeTabStripIfAvailable = customTabSessionId == null),
+             bottomToolbarHeight = bottomToolbarHeight,
+         )
++        // The page makes room again when the rows that the optional features of the patch add next to the address
++        // bar change height (e.g. the user hides one).
++        viewLifecycleOwner.lifecycleScope.launch {
++            PatchFeatureHooks.addressBarRowsChanged.collect { reinitializeEngineView() }
++        }
+ 
+         initializeMicrosurveyFeature(context)
+     }
+@@ -1598,6 +1605,7 @@ abstract class BaseBrowserFragment :
                  onCloseTabClick = { isPrivate ->
                      showUndoSnackbar(requireContext().tabClosedUndoMessage(isPrivate))
                  },
@@ -450,6 +468,83 @@ index 91dddf5d..0fe8128e 100644
          if (isReaderViewActive && accessPoint != MenuAccessPoint.Home) {
              MenuGroup {
                  MenuItem(
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
+index 7f138b48..bd5ffdd2 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
+@@ -56,6 +56,7 @@ import org.mozilla.fenix.components.AppStore
+ import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchEnded
+ import org.mozilla.fenix.components.toolbar.ToolbarPosition.BOTTOM
+ import org.mozilla.fenix.components.toolbar.ToolbarPosition.TOP
++import org.mozilla.fenix.patchfeatures.PatchFeatureHooks
+ import org.mozilla.fenix.theme.FirefoxTheme
+ import org.mozilla.fenix.utils.Settings
+ 
+@@ -175,6 +176,7 @@ class BrowserToolbarComposable(
+                                             settings.shouldUseMinimalBottomToolbarWhenEnteringText,
+                                     )
+                                     if (customTabSession == null) {
++                                        PatchFeatureHooks.AddressBarRows(isHomepage = false)
+                                         searchSuggestionsContent(Modifier.weight(1f))
+                                     }
+                                 }
+@@ -192,6 +194,9 @@ class BrowserToolbarComposable(
+                                     if (shouldShowTabGroupsStrip) {
+                                         tabGroupsStripContent()
+                                     }
++                                    if (customTabSession == null) {
++                                        PatchFeatureHooks.AddressBarRows(isHomepage = false)
++                                    }
+                                     BrowserToolbar(
+                                         store = toolbarStore,
+                                         cfr = toolbarCFR,
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/ext/Fragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/ext/Fragment.kt
+index 0b85c650..4ba23d15 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/ext/Fragment.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/ext/Fragment.kt
+@@ -38,6 +38,7 @@ import org.mozilla.fenix.components.toolbar.ToolbarContainerView
+ import org.mozilla.fenix.components.toolbar.ToolbarPosition
+ import org.mozilla.fenix.navigation.DefaultNavControllerProvider
+ import org.mozilla.fenix.navigation.NavControllerProvider
++import org.mozilla.fenix.patchfeatures.PatchFeatureHooks
+ import org.mozilla.fenix.theme.ThemeManager
+ import org.mozilla.fenix.utils.isLargeScreenSize
+ 
+@@ -294,7 +295,16 @@ fun Fragment.getBottomToolbarHeight(
+             else -> 0
+         }
+ 
+-    return microsurveyHeight + toolbarHeight + navBarHeight + tabstripHeight + tabGroupsStripHeight
++    // The rows that the optional features of the patch add next to the address bar, not in custom tabs (which leave
++    // out the tab strip).
++    val addressBarRowsHeight =
++        when (isToolbarAtBottom && includeTabStripIfAvailable) {
++            true -> PatchFeatureHooks.addressBarRowsHeight(requireContext())
++            else -> 0
++        }
++
++    return microsurveyHeight + toolbarHeight + navBarHeight + tabstripHeight + tabGroupsStripHeight +
++        addressBarRowsHeight
+ }
+ 
+ /**
+@@ -320,7 +330,15 @@ fun Fragment.getTopToolbarHeight(includeTabStripIfAvailable: Boolean = true): In
+             else -> 0
+         }
+ 
+-    return toolbarHeight + tabStripHeight
++    // The rows that the optional features of the patch add next to the address bar, not in custom tabs (which leave
++    // out the tab strip).
++    val addressBarRowsHeight =
++        when (isToolbarAtTop && includeTabStripIfAvailable) {
++            true -> PatchFeatureHooks.addressBarRowsHeight(requireContext())
++            else -> 0
++        }
++
++    return toolbarHeight + tabStripHeight + addressBarRowsHeight
+ }
+ 
+ /**
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt
 index 1312a62f..eb50448e 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt
@@ -470,12 +565,41 @@ index 1312a62f..eb50448e 100644
                  onTabCounterClick = { openTabsTray() },
              )
          }
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
+index c1741b4e..add1f644 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
+@@ -51,6 +51,7 @@ import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchEnded
+ import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchStarted
+ import org.mozilla.fenix.components.appstate.VoiceSearchAction.VoiceInputRequested
+ import org.mozilla.fenix.components.metrics.MetricsUtils
++import org.mozilla.fenix.patchfeatures.PatchFeatureHooks
+ import org.mozilla.fenix.theme.FirefoxTheme
+ import org.mozilla.fenix.utils.Settings
+ import org.mozilla.fenix.wallpapers.WallpaperTheme
+@@ -174,11 +175,16 @@ internal class HomeToolbarComposable(
+                 tabStripContent()
+             }
+ 
++            if (shouldUseBottomToolbar) {
++                PatchFeatureHooks.AddressBarRows(isHomepage = true)
++            }
++
+             AddressBar(wallpaperTextColor = wallpaperTextColor)
+ 
+             if (shouldUseBottomToolbar) {
+                 navigationBarContent?.invoke()
+             } else {
++                PatchFeatureHooks.AddressBarRows(isHomepage = true)
+                 searchSuggestionsContent(Modifier.weight(1f))
+             }
+         }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
 new file mode 100644
-index 00000000..27e261a3
+index 00000000..ce58ce9e
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
-@@ -0,0 +1,252 @@
+@@ -0,0 +1,295 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -491,6 +615,9 @@ index 00000000..27e261a3
 +import androidx.compose.runtime.Composable
 +import androidx.fragment.app.DialogFragment
 +import androidx.preference.PreferenceFragmentCompat
++import kotlinx.coroutines.flow.MutableSharedFlow
++import kotlinx.coroutines.flow.SharedFlow
++import kotlinx.coroutines.flow.asSharedFlow
 +import mozilla.components.compose.base.menu.MenuItem
 +import org.json.JSONArray
 +import org.json.JSONException
@@ -682,7 +809,32 @@ index 00000000..27e261a3
 +     */
 +    fun addCustomizationPreferences(fragment: PreferenceFragmentCompat) = Unit
 +
++    /**
++     * A row the feature adds next to the address bar of the pages and of the homepage (not in custom tabs): under it
++     * when the address bar is at the top, above it when it's at the bottom. It scrolls away with the address bar.
++     *
++     * Its height has to be the one of [addressBarRowHeight], which the pages leave free like for the address bar.
++     *
++     * @param isHomepage Whether it's next to the address bar of the homepage.
++     */
++    @Composable
++    fun AddressBarRow(isHomepage: Boolean) = Unit
++
++    /**
++     * The height of [AddressBarRow] in pixels, or 0 while it's hidden. When it changes without the window changing
++     * (e.g. the user hides the row), the feature calls [PatchFeatureHooks.onAddressBarRowsChanged].
++     *
++     * @param context A context of the activity showing the row.
++     */
++    fun addressBarRowHeight(context: Context): Int = 0
++
 +    companion object {
++        private val addressBarRowsChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
++
++        /** Emits when the rows next to the address bar change height (see [PatchFeatureHooks.addressBarRowHeight]). */
++        val addressBarRowsChanged: SharedFlow<Unit> = addressBarRowsChanges.asSharedFlow()
++
++
 +        /** The entry points of the optional features included in this build. */
 +        val all: List<PatchFeatureHooks>
 +            get() = GeneratedPatchFeatures.hooks
@@ -719,10 +871,25 @@ index 00000000..27e261a3
 +            if (shortcuts.isEmpty()) return null
 +            return KeyboardShortcutGroup(context.getString(R.string.app_name), shortcuts)
 +        }
++
++        /** The rows of the optional features next to the address bar, see [PatchFeatureHooks.AddressBarRow]. */
++        @Composable
++        fun AddressBarRows(isHomepage: Boolean) {
++            all.forEach { it.AddressBarRow(isHomepage) }
++        }
++
++        /** The height in pixels of the rows next to the address bar, see [PatchFeatureHooks.addressBarRowHeight]. */
++        fun addressBarRowsHeight(context: Context): Int = all.sumOf { it.addressBarRowHeight(context) }
++
++        /** Tells the pages to make room again for the rows next to the address bar, see [addressBarRowsChanged]. */
++        fun onAddressBarRowsChanged() {
++            addressBarRowsChanges.tryEmit(Unit)
++        }
 +    }
 +}
 +
-+private tailrec fun Context.findHomeActivity(): HomeActivity? =
++/** Returns the main activity of Firefox from one of its contexts, or `null` if it's another activity. */
++internal tailrec fun Context.findHomeActivity(): HomeActivity? =
 +    when (this) {
 +        is HomeActivity -> this
 +        is ContextWrapper -> baseContext.findHomeActivity()
