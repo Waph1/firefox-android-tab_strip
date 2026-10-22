@@ -1,0 +1,282 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/DropdownMenuFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/DropdownMenuFeature.kt
+new file mode 100644
+index 00000000..084e9302
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/DropdownMenuFeature.kt
+@@ -0,0 +1,169 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import android.app.Dialog
++import android.content.Context
++import android.graphics.Color
++import android.view.Gravity
++import android.view.KeyEvent
++import android.view.View
++import android.view.ViewGroup
++import android.view.WindowManager
++import android.widget.FrameLayout
++import androidx.core.graphics.drawable.toDrawable
++import androidx.fragment.app.DialogFragment
++import org.mozilla.fenix.R
++import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
++import org.mozilla.fenix.components.menu.MenuAccessPoint
++import org.mozilla.fenix.ext.components
++
++private const val MENU_WIDTH_DP = 360
++private const val MENU_MARGIN_DP = 8
++private const val MENU_DIM_AMOUNT = 0.2f
++
++/**
++ * Optional feature "dropdown menu" (`0030-dropdown-menu.patch`): on large screens (the ones showing the tab strip) the
++ * main menu of the pages and of the homepage drops down from the menu button at the end of the toolbar, like in Chrome
++ * for tablets, instead of rising from the bottom of the screen. With the address bar at the bottom, it opens upwards.
++ * The content of the menu is the one of Firefox: only the window changes.
++ */
++object DropdownMenuFeature : PatchFeatureHooks {
++    override fun menuDialog(
++        fragment: DialogFragment,
++        accessPoint: MenuAccessPoint,
++    ): Dialog? {
++        if (accessPoint != MenuAccessPoint.Browser && accessPoint != MenuAccessPoint.Home) return null
++        if (AdaptiveTabStrip.isLargeWindow.value != true) return null
++
++        val context = fragment.requireContext()
++        val settings = context.components.settings
++        val resources = context.resources
++        val tabStripHeight = resources.getDimensionPixelSize(R.dimen.tab_strip_height)
++        val placement =
++            menuDropdownPlacement(
++                isToolbarAtBottom = settings.shouldUseBottomToolbar,
++                tabStripHeight = if (settings.isTabStripEnabled) tabStripHeight else 0,
++                isTabStripAtBottom = settings.shouldUseBottomTabStrip,
++                toolbarHeight = resources.getDimensionPixelSize(R.dimen.composable_browser_toolbar_height),
++                windowWidth = resources.displayMetrics.widthPixels,
++                windowHeight = resources.displayMetrics.heightPixels,
++                density = resources.displayMetrics.density,
++            )
++        return MenuDropdownDialog(context, placement)
++    }
++}
++
++/**
++ * Where the dropdown menu is shown in the window.
++ *
++ * @property gravity The edges of the window the menu is attached to, see [Gravity].
++ * @property x The distance from the end edge of the window, in pixels.
++ * @property y The distance from the top (or bottom, with [Gravity.BOTTOM]) edge of the window, in pixels.
++ * @property width The width of the menu, in pixels.
++ * @property maxHeight The maximum height of the menu, in pixels: its content scrolls beyond it.
++ */
++internal data class MenuDropdownPlacement(
++    val gravity: Int,
++    val x: Int,
++    val y: Int,
++    val width: Int,
++    val maxHeight: Int,
++)
++
++/**
++ * Places the dropdown menu under the menu button at the end of the address bar (above it, when the address bar is at
++ * the bottom), leaving a margin from the edges of the window.
++ *
++ * @param isToolbarAtBottom Whether the address bar is at the bottom of the window.
++ * @param tabStripHeight The height of the tab strip, 0 when it isn't shown.
++ * @param isTabStripAtBottom Whether the tab strip is at the bottom of the window.
++ * @param toolbarHeight The height of the address bar.
++ * @param windowWidth The width of the window.
++ * @param windowHeight The height of the window.
++ * @param density The density of the screen, to convert dp to pixels.
++ */
++@Suppress("LongParameterList")
++internal fun menuDropdownPlacement(
++    isToolbarAtBottom: Boolean,
++    tabStripHeight: Int,
++    isTabStripAtBottom: Boolean,
++    toolbarHeight: Int,
++    windowWidth: Int,
++    windowHeight: Int,
++    density: Float,
++): MenuDropdownPlacement {
++    val margin = (MENU_MARGIN_DP * density).toInt()
++    // The tab strip is between the address bar and the edge of the window when both are on the same side.
++    val tabStripOnToolbarSide = if (isTabStripAtBottom == isToolbarAtBottom) tabStripHeight else 0
++    val y = tabStripOnToolbarSide + toolbarHeight
++    return MenuDropdownPlacement(
++        gravity = Gravity.END or (if (isToolbarAtBottom) Gravity.BOTTOM else Gravity.TOP),
++        x = margin,
++        y = y,
++        width = minOf((MENU_WIDTH_DP * density).toInt(), windowWidth - 2 * margin),
++        maxHeight = windowHeight - y - margin,
++    )
++}
++
++/**
++ * Window of the dropdown menu: a floating window at [placement], closed by touching outside of it, by the back key
++ * (or Esc) and by the menu key or F10, which also open it.
++ */
++private class MenuDropdownDialog(
++    context: Context,
++    private val placement: MenuDropdownPlacement,
++) : Dialog(context, android.R.style.Theme_DeviceDefault_Dialog_NoActionBar) {
++    init {
++        setCanceledOnTouchOutside(true)
++        window?.apply {
++            setBackgroundDrawable(Color.TRANSPARENT.toDrawable())
++            setGravity(placement.gravity)
++            setLayout(placement.width, ViewGroup.LayoutParams.WRAP_CONTENT)
++            attributes =
++                attributes.apply {
++                    x = placement.x
++                    y = placement.y
++                    dimAmount = MENU_DIM_AMOUNT
++                }
++            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
++            setWindowAnimations(android.R.style.Animation_Dialog)
++        }
++    }
++
++    override fun setContentView(view: View) {
++        super.setContentView(MaxHeightLayout(context, placement.maxHeight).apply { addView(view) })
++    }
++
++    override fun onKeyDown(
++        keyCode: Int,
++        event: KeyEvent,
++    ): Boolean {
++        if (keyCode == KeyEvent.KEYCODE_MENU || keyCode == KeyEvent.KEYCODE_F10) {
++            dismiss()
++            return true
++        }
++        return super.onKeyDown(keyCode, event)
++    }
++}
++
++/** Layout that is never taller than [maxHeight]: the content of the menu scrolls instead. */
++private class MaxHeightLayout(
++    context: Context,
++    private val maxHeight: Int,
++) : FrameLayout(context) {
++    override fun onMeasure(
++        widthMeasureSpec: Int,
++        heightMeasureSpec: Int,
++    ) {
++        val limit =
++            if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.UNSPECIFIED) {
++                maxHeight
++            } else {
++                minOf(MeasureSpec.getSize(heightMeasureSpec), maxHeight)
++            }
++        super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(limit, MeasureSpec.AT_MOST))
++    }
++}
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/DropdownMenuFeatureTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/DropdownMenuFeatureTest.kt
+new file mode 100644
+index 00000000..a9e2cd6a
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/DropdownMenuFeatureTest.kt
+@@ -0,0 +1,101 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import android.view.Gravity
++import androidx.fragment.app.DialogFragment
++import io.mockk.every
++import io.mockk.mockk
++import mozilla.components.support.test.robolectric.testContext
++import org.junit.After
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNotNull
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
++import org.mozilla.fenix.components.menu.MenuAccessPoint
++import org.robolectric.RobolectricTestRunner
++
++@RunWith(RobolectricTestRunner::class)
++class DropdownMenuFeatureTest {
++    private val fragment: DialogFragment = mockk { every { requireContext() } returns testContext }
++
++    @After
++    fun tearDown() {
++        // Restore the default state shared by all the tests (see AdaptiveTabStripTest).
++        AdaptiveTabStrip.update(isTabletScreen = true, screenWidthDp = 1000, screenHeightDp = 800)
++    }
++
++    private fun placement(
++        isToolbarAtBottom: Boolean,
++        isTabStripAtBottom: Boolean = false,
++        tabStripHeight: Int = 80,
++        windowWidth: Int = 2000,
++    ) = menuDropdownPlacement(
++        isToolbarAtBottom = isToolbarAtBottom,
++        tabStripHeight = tabStripHeight,
++        isTabStripAtBottom = isTabStripAtBottom,
++        toolbarHeight = 128,
++        windowWidth = windowWidth,
++        windowHeight = 1600,
++        density = 2f,
++    )
++
++    @Test
++    fun `GIVEN the address bar at the top WHEN placing the menu THEN it drops down under the address bar`() {
++        assertEquals(
++            MenuDropdownPlacement(gravity = Gravity.TOP or Gravity.END, x = 16, y = 208, width = 720, maxHeight = 1376),
++            placement(isToolbarAtBottom = false),
++        )
++        // The tab strip at the bottom isn't above the address bar.
++        assertEquals(128, placement(isToolbarAtBottom = false, isTabStripAtBottom = true).y)
++        // No tab strip.
++        assertEquals(128, placement(isToolbarAtBottom = false, tabStripHeight = 0).y)
++    }
++
++    @Test
++    fun `GIVEN the address bar at the bottom WHEN placing the menu THEN it opens upwards above the address bar`() {
++        assertEquals(
++            MenuDropdownPlacement(
++                gravity = Gravity.BOTTOM or Gravity.END,
++                x = 16,
++                y = 128,
++                width = 720,
++                maxHeight = 1456,
++            ),
++            placement(isToolbarAtBottom = true),
++        )
++        assertEquals(208, placement(isToolbarAtBottom = true, isTabStripAtBottom = true).y)
++    }
++
++    @Test
++    fun `GIVEN a narrow window WHEN placing the menu THEN it keeps a margin from the edges`() {
++        assertEquals(668, placement(isToolbarAtBottom = false, windowWidth = 700).width)
++    }
++
++    @Test
++    fun `GIVEN a small screen WHEN the menu is opened THEN it stays a bottom sheet`() {
++        AdaptiveTabStrip.update(isTabletScreen = false, screenWidthDp = 411, screenHeightDp = 960)
++
++        assertNull(DropdownMenuFeature.menuDialog(fragment, MenuAccessPoint.Browser))
++    }
++
++    @Test
++    fun `GIVEN a large screen WHEN the menu of a page or of the homepage is opened THEN it is a dropdown`() {
++        AdaptiveTabStrip.update(isTabletScreen = true, screenWidthDp = 1000, screenHeightDp = 800)
++
++        assertNotNull(DropdownMenuFeature.menuDialog(fragment, MenuAccessPoint.Browser))
++        assertNotNull(DropdownMenuFeature.menuDialog(fragment, MenuAccessPoint.Home))
++        // The menu of the tabs opened by other apps keeps its bottom sheet.
++        assertNull(DropdownMenuFeature.menuDialog(fragment, MenuAccessPoint.External))
++    }
++
++    @Test
++    fun `GIVEN the patch of the feature is applied THEN the feature shows the menu`() {
++        assertTrue(DropdownMenuFeature in PatchFeatureHooks.all)
++    }
++}

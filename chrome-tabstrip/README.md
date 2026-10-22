@@ -212,6 +212,13 @@ sono elencate in **Impostazioni → Informazioni su Firefox → Funzioni della p
   riapre subito le schede appena chiuse (anche private, come «Annulla»), poi l'ultima delle schede chiuse di recente
   (solo normali). AltGr (usato per scrivere caratteri come @ o [) e il tasto Meta non attivano scorciatoie. Limite:
   i siti che usano le stesse combinazioni (ad es. Ctrl+F in un editor online) non le ricevono.
+- **Menu a tendina sugli schermi grandi** (`0030`): a schermo grande il menu **⋮** delle pagine e della home scende
+  dal pulsante, in alto a destra, come in Chrome per tablet, invece di salire dal basso; con la barra degli indirizzi
+  in basso si apre verso l'alto. Il contenuto è quello di Firefox (sottomenu compresi), cambia solo la finestra: se è
+  più alto dello schermo scorre, si chiude toccando fuori, con Indietro/Esc o ripremendo F10 o il tasto Menu. A
+  schermo piccolo, e per le schede aperte da altre app, resta il pannello dal basso. La tendina si posiziona in base
+  all'altezza di tab strip e barra degli indirizzi; se si apre o si chiude il telefono con il menu aperto, resta
+  com'è fino alla chiusura.
 
 ## Versione di Firefox
 
@@ -422,7 +429,8 @@ Modifiche piccole ai file esistenti: `TabStrip.kt` (azioni del menu; il "+" lasc
 funzioni facoltative, con `PatchFeatureHooks.openNewTab`), `BaseBrowserFragment.kt`, `HomeFragment.kt`
 (messaggio «Schede chiuse» con Annulla dopo «Chiudi le altre schede»), `HomeActivity.kt` (i tasti passano prima dalle
 funzioni facoltative, `PatchFeatureHooks.onKeyEvent`, che compaiono anche nella schermata delle scorciatoie di
-Android, `PatchFeatureHooks.keyboardShortcuts`).
+Android, `PatchFeatureHooks.keyboardShortcuts`), `MenuDialogFragment.kt` (una funzione facoltativa può mostrare il
+menu in un'altra finestra, `PatchFeatureHooks.menuDialog`: in quel caso niente maniglia e angoli tutti arrotondati).
 
 ### `0010`: nuova scheda con la barra degli indirizzi attiva (facoltativa)
 
@@ -436,6 +444,11 @@ Solo file nuovi: `patchfeatures/KeyboardShortcuts.kt` (dai tasti alla scorciatoi
 solo), `KeyboardShortcutsFeature.kt` (le azioni, fatte come le fa Firefox: ad es. il segnalibro come il pulsante della
 toolbar, il menu come il tasto Menu), `res/values/` e `res/values-it/keyboard_shortcuts_strings.xml`,
 `test/.../KeyboardShortcutsTest.kt`.
+
+### `0030`: menu a tendina sugli schermi grandi (facoltativa)
+
+Solo file nuovi: `patchfeatures/DropdownMenuFeature.kt` (la finestra a tendina e la sua posizione) e
+`test/.../DropdownMenuFeatureTest.kt`.
 
 ## Differenze rispetto a Chrome
 

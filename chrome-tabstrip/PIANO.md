@@ -18,7 +18,7 @@ schermo grande" compare e sparisce **al volo** aprendo e chiudendo il telefono, 
 | 0  | Patch divise e avviso negli aggiornamenti         | base + `0002`                | obbligatoria | fatto       |
 | 1  | Nuova scheda con la barra degli indirizzi attiva  | `0010-new-tab-focus`         | facoltativa | fatto        |
 | 2  | Scorciatoie da tastiera fisica                    | `0020-keyboard-shortcuts`    | facoltativa | fatto        |
-| 3  | Menu ⋮ a tendina                                  | `0030-dropdown-menu`         | facoltativa | da fare      |
+| 3  | Menu ⋮ a tendina                                  | `0030-dropdown-menu`         | facoltativa | fatto        |
 | 4  | Zoom della pagina come su desktop                 | `0040-page-zoom`             | facoltativa | da fare      |
 | 5  | Barra dei segnalibri                              | `0050-bookmarks-bar`         | facoltativa | da fare      |
 | 6  | Mouse e trackpad                                  | `0060-mouse`                 | facoltativa | da fare      |
@@ -174,6 +174,10 @@ segnalibri (5), Ctrl+Tab che salta le schede dei gruppi chiusi con i gruppi (8).
 
 **Come:** si riusa il contenuto del menu di upstream e si cambia solo il "contenitore", così le novità che Mozilla
 aggiunge al menu arrivano anche nella tendina.
+
+**Fatto**, con il punto di aggancio `PatchFeatureHooks.menuDialog` della `0002`. La posizione è calcolata dalle
+altezze di tab strip e barra degli indirizzi (il pulsante ⋮ è all'estremità della barra), non letta dal pulsante.
+Con la tastiera si naviga con Tab e frecce, come nel resto di Firefox.
 
 ---
 
