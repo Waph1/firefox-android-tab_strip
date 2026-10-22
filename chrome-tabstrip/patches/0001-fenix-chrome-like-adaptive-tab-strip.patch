@@ -2899,7 +2899,7 @@ index 00000000..eb979e22
 +}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt
 new file mode 100644
-index 00000000..bb0917c9
+index 00000000..904c2f52
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/AdaptiveTabStripTest.kt
 @@ -0,0 +1,95 @@
@@ -2978,8 +2978,8 @@ index 00000000..bb0917c9
 +
 +        AdaptiveTabStrip.update(isTabletScreen = true, screenWidthDp = 690, screenHeightDp = 829)
 +        assertTrue(settings.isTabStripEnabled)
-+        // Like in Chrome, the toolbar moves to the top together with the tab strip.
-+        assertEquals(ToolbarPosition.TOP, settings.toolbarPosition)
++        // Since Firefox 158 the tab strip works with the address bar at the bottom: the address bar stays there.
++        assertEquals(ToolbarPosition.BOTTOM, settings.toolbarPosition)
 +
 +        AdaptiveTabStrip.update(isTabletScreen = false, screenWidthDp = 411, screenHeightDp = 960)
 +        assertFalse(settings.isTabStripEnabled)
