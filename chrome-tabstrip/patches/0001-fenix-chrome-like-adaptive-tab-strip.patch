@@ -1,17 +1,16 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
-index daf3317d..78266119 100644
+index daf3317d..5bc14a7e 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
-@@ -114,6 +114,8 @@ import org.mozilla.fenix.browser.BrowserFragmentDirections
+@@ -114,6 +114,7 @@ import org.mozilla.fenix.browser.BrowserFragmentDirections
  import org.mozilla.fenix.browser.browsingmode.BrowsingMode
  import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
  import org.mozilla.fenix.browser.browsingmode.DefaultBrowsingModeManager
 +import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
-+import org.mozilla.fenix.browser.tabstrip.ImmersiveTabStrip
  import org.mozilla.fenix.components.DefaultHomepageAsANewTabPreferenceRepository
  import org.mozilla.fenix.components.DefaultShortcutManagerCompatWrapper
  import org.mozilla.fenix.components.accounts.FenixFxAEntryPoint
-@@ -187,6 +189,7 @@ import org.mozilla.fenix.perf.StartupPathProvider
+@@ -187,6 +188,7 @@ import org.mozilla.fenix.perf.StartupPathProvider
  import org.mozilla.fenix.perf.StartupTimeline
  import org.mozilla.fenix.perf.StartupTypeTelemetry
  import org.mozilla.fenix.privacyreport.PrivacyReportNotificationScheduler
@@ -19,19 +18,7 @@ index daf3317d..78266119 100644
  import org.mozilla.fenix.session.PrivateNotificationService
  import org.mozilla.fenix.settings.SupportUtils
  import org.mozilla.fenix.shortcut.NewTabShortcutIntentProcessor.Companion.ACTION_OPEN_PRIVATE_TAB
-@@ -413,6 +416,11 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
-         )
-     }
- 
-+    // Hides the status bar while the tab strip is shown, so that the tabs sit flush with the top edge of the screen.
-+    private val immersiveTabStrip by lazy {
-+        ImmersiveTabStrip(activity = this, isTabStripShown = { components.settings.isTabStripEnabled })
-+    }
-+
-     // See onKeyDown for why this is necessary
-     private var backLongPressJob: Job? = null
- 
-@@ -477,6 +485,9 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -477,6 +479,9 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
              browsingModeManager = createBrowsingModeManager(intent)
              setupTheme()
  
@@ -41,20 +28,19 @@ index daf3317d..78266119 100644
              super.onCreate(savedInstanceState)
          }
  
-@@ -485,6 +496,12 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -485,6 +490,11 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
          // the `setContent` starts attaching fragments.
          EdgeToEdgeFragmentLifecycleCallbacks.register(supportFragmentManager, window)
  
 +        // Custom tabs never show the tab strip, nor look for updates.
 +        if (this !is ExternalAppBrowserActivity) {
-+            immersiveTabStrip.start(supportFragmentManager)
 +            SelfUpdater(this).start()
 +        }
 +
          // Checks if Activity is currently in PiP mode if launched from external intents, then exits it
          checkAndExitPiP()
  
-@@ -1023,6 +1040,12 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -1023,6 +1033,11 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
      }
  
      final override fun onConfigurationChanged(newConfig: Configuration) {
@@ -62,12 +48,11 @@ index daf3317d..78266119 100644
 +        // so they lay themselves out with the new toolbar height.
 +        val wasTabStripShown = components.settings.isTabStripEnabled
 +        AdaptiveTabStrip.onWindowChanged(this, newConfig)
-+        immersiveTabStrip.update()
 +
          super.onConfigurationChanged(newConfig)
  
          // Diagnostic breadcrumb for "Display already aquired" crash:
-@@ -1032,6 +1055,18 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -1032,6 +1047,18 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
          components.appStore.dispatch(
              AppAction.OrientationChange(orientation = OrientationMode.fromInteger(newConfig.orientation))
          )
@@ -1248,212 +1233,6 @@ index 00000000..63262fea
 +                }
 +            drawRect(brush = brush, blendMode = BlendMode.DstIn)
 +        }
-diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ImmersiveTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ImmersiveTabStrip.kt
-new file mode 100644
-index 00000000..706a42c2
---- /dev/null
-+++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ImmersiveTabStrip.kt
-@@ -0,0 +1,200 @@
-+/* This Source Code Form is subject to the terms of the Mozilla Public
-+ * License, v. 2.0. If a copy of the MPL was not distributed with this
-+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-+
-+package org.mozilla.fenix.browser.tabstrip
-+
-+import android.app.Activity
-+import android.os.Build.VERSION.SDK_INT
-+import android.os.Build.VERSION_CODES
-+import android.os.Bundle
-+import android.view.View
-+import android.view.Window
-+import android.view.WindowManager
-+import androidx.annotation.VisibleForTesting
-+import androidx.core.graphics.Insets
-+import androidx.core.view.ViewCompat
-+import androidx.core.view.WindowInsetsAnimationCompat
-+import androidx.core.view.WindowInsetsCompat
-+import androidx.core.view.WindowInsetsCompat.Type.displayCutout
-+import androidx.core.view.WindowInsetsCompat.Type.statusBars
-+import androidx.core.view.WindowInsetsControllerCompat
-+import androidx.fragment.app.DialogFragment
-+import androidx.fragment.app.Fragment
-+import androidx.fragment.app.FragmentManager
-+
-+/**
-+ * Hides the status bar while the tab strip is shown, so that the tabs sit flush with the top edge of the screen (e.g.
-+ * on the inner screen of an unfolded foldable), and shows it again as soon as the tab strip goes away (e.g. when the
-+ * foldable is folded and the app moves to the cover screen).
-+ *
-+ * While hidden, the status bar can still be revealed for a moment by swiping down from the top edge of the screen. It
-+ * is then laid over the tabs: the app content is given window insets in which the status bar and the top display cutout
-+ * take no space (see [transformInsets]), so that the UI never moves when the status bar is revealed, nor when a window
-+ * that does not hide it (e.g. a popup) brings it back. Dialogs hide it as well while they are shown.
-+ *
-+ * Only on Android 13+, where Fenix is shown edge-to-edge, and never in multi-window mode, where the system keeps the
-+ * status bar visible.
-+ *
-+ * @param activity The activity showing the tab strip.
-+ * @param isTabStripShown Whether the tab strip is currently shown, which may change with the window (e.g. when a
-+ *   foldable is folded / unfolded) or with the user preference.
-+ */
-+class ImmersiveTabStrip(
-+    private val activity: Activity,
-+    private val isTabStripShown: () -> Boolean,
-+) {
-+    private val window: Window
-+        get() = activity.window
-+
-+    private var isStarted = false
-+
-+    /** Dialogs currently shown: while focused, they decide whether the status bar is shown. */
-+    private val shownDialogs = mutableSetOf<DialogFragment>()
-+
-+    /** Whether the status bar is currently hidden because the tab strip is shown. */
-+    var isStatusBarHidden: Boolean = false
-+        private set
-+
-+    private val dialogCallbacks =
-+        object : FragmentManager.FragmentLifecycleCallbacks() {
-+            override fun onFragmentViewCreated(
-+                fm: FragmentManager,
-+                f: Fragment,
-+                v: View,
-+                savedInstanceState: Bundle?,
-+            ) {
-+                // Before the dialog is shown, so that it doesn't bring the status bar back even for a moment.
-+                if (f is DialogFragment && isStatusBarHidden) {
-+                    f.dialog?.window?.setStatusBarHidden(true)
-+                }
-+            }
-+
-+            override fun onFragmentStarted(
-+                fm: FragmentManager,
-+                f: Fragment,
-+            ) {
-+                if (f is DialogFragment) {
-+                    shownDialogs += f
-+                    f.dialog?.window?.setStatusBarHidden(isStatusBarHidden)
-+                }
-+            }
-+
-+            override fun onFragmentStopped(
-+                fm: FragmentManager,
-+                f: Fragment,
-+            ) {
-+                if (f is DialogFragment) {
-+                    shownDialogs -= f
-+                }
-+            }
-+        }
-+
-+    /**
-+     * Starts hiding / showing the status bar together with the tab strip. Must be called from `onCreate`, before the
-+     * content view is set.
-+     *
-+     * @param fragmentManager The [FragmentManager] of [activity], used to also hide the status bar in its dialogs.
-+     */
-+    fun start(fragmentManager: FragmentManager) {
-+        if (SDK_INT < VERSION_CODES.TIRAMISU || isStarted) return
-+        isStarted = true
-+
-+        val decorView = window.decorView
-+        ViewCompat.setOnApplyWindowInsetsListener(decorView) { view, insets ->
-+            // Let the decor view handle the real insets, then pass the adjusted ones to the app content. Every change
-+            // of window (folding, multi-window, ...) or of screen (fragments request new insets) passes by here: also
-+            // hide the status bar again if something showed it, e.g. when leaving a fullscreen video.
-+            val decorInsets = ViewCompat.onApplyWindowInsets(view, insets)
-+            update()
-+            transformInsets(decorInsets)
-+        }
-+        // Insets animations (e.g. the keyboard) are dispatched separately: adjust them too, so the content keeps its
-+        // position while they run.
-+        ViewCompat.setWindowInsetsAnimationCallback(
-+            decorView,
-+            object : WindowInsetsAnimationCompat.Callback(DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
-+                override fun onProgress(
-+                    insets: WindowInsetsCompat,
-+                    runningAnimations: MutableList<WindowInsetsAnimationCompat>,
-+                ): WindowInsetsCompat = transformInsets(insets)
-+            },
-+        )
-+        fragmentManager.registerFragmentLifecycleCallbacks(dialogCallbacks, true)
-+
-+        update()
-+    }
-+
-+    /**
-+     * Hides or shows the status bar to match the tab strip. Called automatically every time the window insets change,
-+     * call it when the tab strip visibility may have changed (e.g. when the configuration changes).
-+     */
-+    fun update() {
-+        // Fullscreen content (e.g. a video) hides all the system bars by itself and shows them back when leaving it.
-+        if (!isStarted || window.isInFullScreen()) return
-+
-+        val shouldHide =
-+            shouldHideStatusBar(
-+                sdkInt = SDK_INT,
-+                isInMultiWindowMode = activity.isInMultiWindowMode,
-+                isTabStripShown = isTabStripShown(),
-+            )
-+        if (shouldHide) {
-+            window.setStatusBarHidden(true)
-+        } else if (isStatusBarHidden) {
-+            window.setStatusBarHidden(false)
-+        }
-+
-+        if (shouldHide != isStatusBarHidden) {
-+            isStatusBarHidden = shouldHide
-+            shownDialogs.forEach { it.dialog?.window?.setStatusBarHidden(shouldHide) }
-+            // The insets given to the app content depend on it.
-+            ViewCompat.requestApplyInsets(window.decorView)
-+        }
-+    }
-+
-+    /**
-+     * Returns the window insets as the app content should see them: while the status bar is hidden, neither it nor the
-+     * top display cutout (e.g. a camera hole) take any space, so that the tabs sit flush with the top edge of the
-+     * screen and stay there when the status bar is revealed for a moment.
-+     */
-+    @VisibleForTesting
-+    internal fun transformInsets(insets: WindowInsetsCompat): WindowInsetsCompat {
-+        if (!isStatusBarHidden || window.isInFullScreen()) return insets
-+
-+        val cutout = insets.getInsets(displayCutout())
-+        return WindowInsetsCompat.Builder(insets)
-+            .setInsets(statusBars(), Insets.NONE)
-+            .setInsets(displayCutout(), Insets.of(cutout.left, 0, cutout.right, cutout.bottom))
-+            .build()
-+    }
-+
-+    private fun Window.isInFullScreen() = attributes.flags and WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS != 0
-+
-+    private fun Window.setStatusBarHidden(hidden: Boolean) {
-+        val insetsController = WindowInsetsControllerCompat(this, decorView)
-+        if (hidden) {
-+            insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-+            insetsController.hide(statusBars())
-+        } else {
-+            insetsController.show(statusBars())
-+        }
-+    }
-+
-+    companion object {
-+        /**
-+         * Whether the status bar should be hidden.
-+         *
-+         * @param sdkInt The Android version: only from Android 13, where Fenix is shown edge-to-edge.
-+         * @param isInMultiWindowMode Whether the app shares the screen with other apps: the system then keeps the
-+         *   status bar visible.
-+         * @param isTabStripShown Whether the tab strip is shown.
-+         */
-+        @VisibleForTesting
-+        internal fun shouldHideStatusBar(
-+            sdkInt: Int,
-+            isInMultiWindowMode: Boolean,
-+            isTabStripShown: Boolean,
-+        ) = sdkInt >= VERSION_CODES.TIRAMISU && !isInMultiWindowMode && isTabStripShown
-+    }
-+}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
 index 8155be98..91f7571e 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
@@ -2996,158 +2775,6 @@ index 00000000..904c2f52
 +
 +        assertFalse(settings.isTabStripPreferenceEnabled)
 +        assertFalse(settings.isTabStripEnabled)
-+    }
-+}
-diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/ImmersiveTabStripTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/ImmersiveTabStripTest.kt
-new file mode 100644
-index 00000000..c7adcd7d
---- /dev/null
-+++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/ImmersiveTabStripTest.kt
-@@ -0,0 +1,146 @@
-+/* This Source Code Form is subject to the terms of the Mozilla Public
-+ * License, v. 2.0. If a copy of the MPL was not distributed with this
-+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-+
-+package org.mozilla.fenix.browser.tabstrip
-+
-+import android.os.Build.VERSION_CODES
-+import android.view.WindowManager
-+import androidx.core.graphics.Insets
-+import androidx.core.view.WindowInsetsCompat
-+import androidx.core.view.WindowInsetsCompat.Type.displayCutout
-+import androidx.core.view.WindowInsetsCompat.Type.navigationBars
-+import androidx.core.view.WindowInsetsCompat.Type.statusBars
-+import androidx.core.view.WindowInsetsCompat.Type.systemBars
-+import androidx.fragment.app.FragmentActivity
-+import org.junit.Assert.assertEquals
-+import org.junit.Assert.assertFalse
-+import org.junit.Assert.assertSame
-+import org.junit.Assert.assertTrue
-+import org.junit.Before
-+import org.junit.Test
-+import org.junit.runner.RunWith
-+import org.robolectric.Robolectric
-+import org.robolectric.RobolectricTestRunner
-+
-+@RunWith(RobolectricTestRunner::class)
-+class ImmersiveTabStripTest {
-+
-+    private lateinit var activity: FragmentActivity
-+    private var isTabStripShown = true
-+
-+    // Status bar and camera hole at the top, navigation bar at the bottom, another cutout on the left.
-+    private val insets =
-+        WindowInsetsCompat.Builder()
-+            .setInsets(statusBars(), Insets.of(0, 63, 0, 0))
-+            .setInsets(displayCutout(), Insets.of(20, 80, 0, 0))
-+            .setInsets(navigationBars(), Insets.of(0, 0, 0, 48))
-+            .build()
-+
-+    @Before
-+    fun setUp() {
-+        activity = Robolectric.buildActivity(FragmentActivity::class.java).create().get()
-+        isTabStripShown = true
-+    }
-+
-+    private fun createImmersiveTabStrip() = ImmersiveTabStrip(activity) { isTabStripShown }
-+
-+    @Test
-+    fun `GIVEN the tab strip is shown WHEN started THEN the status bar is hidden and takes no space`() {
-+        val immersiveTabStrip = createImmersiveTabStrip()
-+
-+        immersiveTabStrip.start(activity.supportFragmentManager)
-+
-+        assertTrue(immersiveTabStrip.isStatusBarHidden)
-+        val contentInsets = immersiveTabStrip.transformInsets(insets)
-+        assertEquals(Insets.NONE, contentInsets.getInsets(statusBars()))
-+        assertEquals(Insets.of(0, 0, 0, 48), contentInsets.getInsets(systemBars()))
-+        // Only the top of the display cutout is ignored, so that the tabs reach the top edge of the screen.
-+        assertEquals(Insets.of(20, 0, 0, 0), contentInsets.getInsets(displayCutout()))
-+        assertEquals(Insets.of(0, 0, 0, 48), contentInsets.getInsets(navigationBars()))
-+    }
-+
-+    @Test
-+    fun `GIVEN the tab strip is not shown WHEN started THEN the status bar is shown and insets are unchanged`() {
-+        isTabStripShown = false
-+        val immersiveTabStrip = createImmersiveTabStrip()
-+
-+        immersiveTabStrip.start(activity.supportFragmentManager)
-+
-+        assertFalse(immersiveTabStrip.isStatusBarHidden)
-+        assertSame(insets, immersiveTabStrip.transformInsets(insets))
-+    }
-+
-+    @Test
-+    fun `GIVEN the status bar is hidden WHEN the tab strip goes away THEN the status bar is shown again`() {
-+        val immersiveTabStrip = createImmersiveTabStrip()
-+        immersiveTabStrip.start(activity.supportFragmentManager)
-+        assertTrue(immersiveTabStrip.isStatusBarHidden)
-+
-+        // E.g. the foldable is folded.
-+        isTabStripShown = false
-+        immersiveTabStrip.update()
-+        assertFalse(immersiveTabStrip.isStatusBarHidden)
-+        assertSame(insets, immersiveTabStrip.transformInsets(insets))
-+
-+        // And unfolded again.
-+        isTabStripShown = true
-+        immersiveTabStrip.update()
-+        assertTrue(immersiveTabStrip.isStatusBarHidden)
-+    }
-+
-+    @Test
-+    fun `GIVEN fullscreen content WHEN the tab strip changes THEN the system bars are left to the fullscreen mode`() {
-+        val immersiveTabStrip = createImmersiveTabStrip()
-+        immersiveTabStrip.start(activity.supportFragmentManager)
-+        activity.window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
-+
-+        isTabStripShown = false
-+        immersiveTabStrip.update()
-+
-+        assertTrue(immersiveTabStrip.isStatusBarHidden)
-+        assertSame(insets, immersiveTabStrip.transformInsets(insets))
-+    }
-+
-+    @Test
-+    fun `GIVEN not started WHEN updating THEN nothing changes`() {
-+        val immersiveTabStrip = createImmersiveTabStrip()
-+
-+        immersiveTabStrip.update()
-+
-+        assertFalse(immersiveTabStrip.isStatusBarHidden)
-+        assertSame(insets, immersiveTabStrip.transformInsets(insets))
-+    }
-+
-+    @Test
-+    fun `WHEN deciding THEN the status bar is hidden only with the tab strip, from Android 13, not in multi-window`() {
-+        assertTrue(
-+            ImmersiveTabStrip.shouldHideStatusBar(
-+                sdkInt = VERSION_CODES.TIRAMISU,
-+                isInMultiWindowMode = false,
-+                isTabStripShown = true,
-+            )
-+        )
-+        assertFalse(
-+            ImmersiveTabStrip.shouldHideStatusBar(
-+                sdkInt = VERSION_CODES.TIRAMISU,
-+                isInMultiWindowMode = false,
-+                isTabStripShown = false,
-+            )
-+        )
-+        assertFalse(
-+            ImmersiveTabStrip.shouldHideStatusBar(
-+                sdkInt = VERSION_CODES.TIRAMISU,
-+                isInMultiWindowMode = true,
-+                isTabStripShown = true,
-+            )
-+        )
-+        assertFalse(
-+            ImmersiveTabStrip.shouldHideStatusBar(
-+                sdkInt = VERSION_CODES.S_V2,
-+                isInMultiWindowMode = false,
-+                isTabStripShown = true,
-+            )
-+        )
 +    }
 +}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/TabStripModeToggleTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/TabStripModeToggleTest.kt

@@ -1,5 +1,5 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
-index 78266119..8aaabfe3 100644
+index 5bc14a7e..9fd3a5fe 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
 @@ -20,7 +20,9 @@ import android.text.format.DateUtils
@@ -12,7 +12,7 @@ index 78266119..8aaabfe3 100644
  import android.view.MotionEvent
  import android.view.View
  import android.view.ViewConfiguration
-@@ -179,6 +181,7 @@ import org.mozilla.fenix.nimbus.FxNimbus
+@@ -178,6 +180,7 @@ import org.mozilla.fenix.nimbus.FxNimbus
  import org.mozilla.fenix.onboarding.ensureMarketingChannelExists
  import org.mozilla.fenix.onboarding.seedOnboardingCompletedTimestampForDebugIfNeeded
  import org.mozilla.fenix.pbmlock.DefaultPrivateBrowsingLockStorage
@@ -20,15 +20,15 @@ index 78266119..8aaabfe3 100644
  import org.mozilla.fenix.pbmlock.PrivateBrowsingLockFeature
  import org.mozilla.fenix.perf.DefaultStartupPathProvider
  import org.mozilla.fenix.perf.MarkersActivityLifecycleCallbacks
-@@ -500,6 +503,7 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -493,6 +496,7 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+         // Custom tabs never show the tab strip, nor look for updates.
          if (this !is ExternalAppBrowserActivity) {
-             immersiveTabStrip.start(supportFragmentManager)
              SelfUpdater(this).start()
 +            PatchFeatureHooks.all.forEach { it.onActivityCreated(this) }
          }
  
          // Checks if Activity is currently in PiP mode if launched from external intents, then exits it
-@@ -1364,6 +1368,8 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -1356,6 +1360,8 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
      }
  
      override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -37,7 +37,7 @@ index 78266119..8aaabfe3 100644
          // The KEYCODE_MENU event is handled here instead of onKeyDown or onKeyUp because
          // after navigating to another fragment like Settings or Bookmarks, and then back this
          // key event is somehow getting consumed before it reaches onKeyDown or onKeyUp.
-@@ -1391,6 +1397,15 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -1383,6 +1389,15 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
          return super.dispatchKeyEvent(event)
      }
  

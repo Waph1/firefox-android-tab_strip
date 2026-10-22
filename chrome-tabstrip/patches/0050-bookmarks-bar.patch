@@ -590,10 +590,10 @@ index 00000000..b18813a1
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarFeature.kt
 new file mode 100644
-index 00000000..a9fe50c8
+index 00000000..a48dad23
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarFeature.kt
-@@ -0,0 +1,257 @@
+@@ -0,0 +1,259 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -723,7 +723,9 @@ index 00000000..a9fe50c8
 +        )
 +
 +    override fun addCustomizationPreferences(fragment: PreferenceFragmentCompat) {
-+        val context = fragment.requireContext()
++        // The preferences take their look from the context of the preference manager (with the preference theme of
++        // Firefox): with the one of the activity they would get the system one, which crashes on some phones.
++        val context = fragment.preferenceManager.context
 +        val category =
 +            PreferenceCategory(context).apply {
 +                title = context.getString(R.string.bookmarks_bar_preferences_category)
