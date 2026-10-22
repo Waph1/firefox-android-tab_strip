@@ -590,10 +590,10 @@ index 00000000..b18813a1
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarFeature.kt
 new file mode 100644
-index 00000000..20f0dbef
+index 00000000..a9fe50c8
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarFeature.kt
-@@ -0,0 +1,253 @@
+@@ -0,0 +1,257 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -623,6 +623,7 @@ index 00000000..20f0dbef
 +import kotlinx.coroutines.flow.MutableSharedFlow
 +import kotlinx.coroutines.flow.MutableStateFlow
 +import kotlinx.coroutines.flow.collectLatest
++import kotlinx.coroutines.flow.onStart
 +import kotlinx.coroutines.launch
 +import mozilla.appservices.places.BookmarkRoot
 +import mozilla.components.concept.engine.EngineSession.LoadUrlFlags
@@ -654,7 +655,9 @@ index 00000000..20f0dbef
 + */
 +object BookmarksBarFeature : PatchFeatureHooks {
 +    private val scope = MainScope()
-+    private val isEnabled = MutableStateFlow(true)
++
++    /** Whether the user shows the bookmarks toolbar (the default), read once the feature starts. */
++    private val isBarShown = MutableStateFlow(false)
 +
 +    /** The "Bookmarks Toolbar" folder with all its bookmarks, or `null` until it's read. */
 +    private val toolbarFolder = MutableStateFlow<BookmarkNode?>(null)
@@ -686,11 +689,12 @@ index 00000000..20f0dbef
 +        if (preferences != null) return
 +        val preferences = activity.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 +        this.preferences = preferences
-+        isEnabled.value = preferences.getBoolean(PREF_IS_SHOWN, true)
++        isBarShown.value = preferences.getBoolean(PREF_IS_SHOWN, true)
 +
 +        val bookmarksStorage = activity.components.core.bookmarksStorage
 +        scope.launch {
-+            refreshRequests.collectLatest {
++            // Also reads them right away: the requests made before don't wait for the first reading.
++            refreshRequests.onStart { emit(Unit) }.collectLatest {
 +                bookmarksStorage.getTree(BookmarkRoot.Toolbar.id, recursive = true).getOrNull()?.let {
 +                    toolbarFolder.value = it
 +                }
@@ -705,7 +709,7 @@ index 00000000..20f0dbef
 +        if (!isBookmarksBarShortcut(event.keyCode, event.metaState) || !AdaptiveTabStrip.isTabStripAllowed) {
 +            return false
 +        }
-+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) setEnabled(!isEnabled.value)
++        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) setBarShown(!isBarShown.value)
 +        return true
 +    }
 +
@@ -732,9 +736,9 @@ index 00000000..20f0dbef
 +                isIconSpaceReserved = false
 +                title = context.getString(R.string.bookmarks_bar_preference_title)
 +                summary = context.getString(R.string.bookmarks_bar_preference_summary)
-+                isChecked = isEnabled.value
++                isChecked = isBarShown.value
 +                setOnPreferenceChangeListener { _, newValue ->
-+                    setEnabled(newValue as Boolean)
++                    setBarShown(newValue as Boolean)
 +                    true
 +                }
 +            },
@@ -743,8 +747,8 @@ index 00000000..20f0dbef
 +
 +    @Composable
 +    override fun AddressBarRow(isHomepage: Boolean) {
-+        val enabled by isEnabled.collectAsState()
-+        if (!enabled || !AdaptiveTabStrip.isTabStripAllowed) return
++        val isShown by isBarShown.collectAsState()
++        if (!isShown || !AdaptiveTabStrip.isTabStripAllowed) return
 +
 +        val context = LocalContext.current
 +        val lifecycleOwner = LocalLifecycleOwner.current
@@ -767,7 +771,7 @@ index 00000000..20f0dbef
 +    }
 +
 +    override fun addressBarRowHeight(context: Context): Int =
-+        if (isEnabled.value && AdaptiveTabStrip.isTabStripAllowed) {
++        if (isBarShown.value && AdaptiveTabStrip.isTabStripAllowed) {
 +            (BOOKMARKS_BAR_HEIGHT_DP * context.resources.displayMetrics.density).roundToInt()
 +        } else {
 +            0
@@ -777,10 +781,10 @@ index 00000000..20f0dbef
 +        refreshRequests.tryEmit(Unit)
 +    }
 +
-+    private fun setEnabled(enabled: Boolean) {
-+        if (isEnabled.value == enabled) return
-+        isEnabled.value = enabled
-+        preferences?.edit { putBoolean(PREF_IS_SHOWN, enabled) }
++    private fun setBarShown(isShown: Boolean) {
++        if (isBarShown.value == isShown) return
++        isBarShown.value = isShown
++        preferences?.edit { putBoolean(PREF_IS_SHOWN, isShown) }
 +        PatchFeatureHooks.onAddressBarRowsChanged()
 +    }
 +
