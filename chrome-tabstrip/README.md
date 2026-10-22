@@ -210,8 +210,9 @@ sono elencate in **Impostazioni → Informazioni su Firefox → Funzioni della p
 
   Ctrl+T e Ctrl+Q funzionano ovunque, le altre sulle pagine e sulla home (non, ad es., nelle impostazioni). Ctrl+Shift+T
   riapre subito le schede appena chiuse (anche private, come «Annulla»), poi l'ultima delle schede chiuse di recente
-  (solo normali). AltGr (usato per scrivere caratteri come @ o [) e il tasto Meta non attivano scorciatoie. Limite:
-  i siti che usano le stesse combinazioni (ad es. Ctrl+F in un editor online) non le ricevono.
+  (solo normali). Ctrl+Tab e Ctrl+1 … Ctrl+9 saltano le schede nascoste nella tab strip (ad es. quelle dei gruppi
+  chiusi, funzione `0080`). AltGr (usato per scrivere caratteri come @ o [) e il tasto Meta non attivano scorciatoie.
+  Limite: i siti che usano le stesse combinazioni (ad es. Ctrl+F in un editor online) non le ricevono.
 - **Menu a tendina sugli schermi grandi** (`0030`): a schermo grande il menu **⋮** delle pagine e della home scende
   dal pulsante, in alto a destra, come in Chrome per tablet, invece di salire dal basso; con la barra degli indirizzi
   in basso si apre verso l'alto. Il contenuto è quello di Firefox (sottomenu compresi), cambia solo la finestra: se è
@@ -259,6 +260,21 @@ sono elencate in **Impostazioni → Informazioni su Firefox → Funzioni della p
   l'audio della scheda, come la voce «Disattiva audio della scheda» / «Riattiva audio della scheda» del menu della
   scheda. Sulle schede strette si accorcia prima il titolo. L'icona segue gli elementi audio e video della pagina: i
   suoni di qualche gioco che non li usa non la mostrano.
+- **Gruppi di schede nella tab strip** (`0080`): i gruppi di schede di Firefox (quelli della panoramica delle schede)
+  compaiono nella tab strip come in Chrome. Sono **attivi** (si possono disattivare in Impostazioni → Schede → Gruppi
+  di schede).
+  - Prima delle schede di un gruppo c'è un'**etichetta** del colore del gruppo con il suo nome (un pallino colorato
+    se non ha nome); le schede del gruppo sono sottolineate con il suo colore e stanno **sempre vicine**.
+  - Toccando l'etichetta il gruppo **si chiude o si riapre** (chiuso, mostra quante schede ha). Se contiene la scheda
+    attiva, si passa alla scheda più vicina fuori dal gruppo (se non ce ne sono, il gruppo resta aperto); un gruppo
+    chiuso si riapre da solo quando una sua scheda viene selezionata, ad es. dalla panoramica delle schede.
+  - Menu della scheda: **Aggiungi la scheda a un gruppo** (la scelta del gruppo di Firefox, dove si può anche crearne
+    uno nuovo) e **Rimuovi dal gruppo**.
+  - Pressione prolungata o clic destro sull'etichetta: **Modifica il gruppo** (nome e colore, con la schermata di
+    Firefox), **Separa il gruppo** (le schede restano), **Chiudi il gruppo**, che lo chiude come la panoramica delle
+    schede: sparisce dalla tab strip e si riapre da lì.
+  - I gruppi creati nella panoramica delle schede compaiono nella tab strip e viceversa. Le schede private non hanno
+    gruppi, come in Firefox.
 
 ## Versione di Firefox
 
@@ -476,7 +492,8 @@ delle funzioni facoltative in cima al menu, `PatchFeatureHooks.MainMenuItems`), 
 in `HomeActivity.kt` anche l'avvio delle funzioni facoltative (`PatchFeatureHooks.onActivityCreated`).
 `ChromeStyleTabStrip.kt` (della `0001`) lascia aggiungere qualcosa a ogni scheda (`PatchFeatureHooks.TabStripTab`, con
 le azioni chiudi e mostra il menu), icone dopo il titolo (`PatchFeatureHooks.TabStripTabIcons`) e qualcosa alla lista
-delle schede (`PatchFeatureHooks.tabStripModifier`).
+delle schede (`PatchFeatureHooks.tabStripModifier`); una funzione facoltativa può anche disporre la tab strip, con
+elementi propri tra le schede e schede nascoste (`PatchFeatureHooks.tabStripEntries`, `isTabHidden`).
 `BrowserToolbarComposable.kt` e `HomeToolbarComposable.kt` mostrano accanto alla barra degli indirizzi le righe delle
 funzioni facoltative (`PatchFeatureHooks.AddressBarRow`), `ext/Fragment.kt` ne conta l'altezza nello spazio che le
 pagine lasciano alle barre (`PatchFeatureHooks.addressBarRowHeight`) e `BaseBrowserFragment.kt` lo ricalcola quando
@@ -527,6 +544,14 @@ Solo file nuovi: `patchfeatures/Mouse.kt` (scorrimento con la rotella, posizione
 Solo file nuovi: `patchfeatures/TabAudio.kt` (quale icona mostrare dallo stato della «media session» della scheda),
 `TabAudioFeature.kt` (l'icona, il tocco e la voce del menu della scheda, che silenziano con il controller della media
 session), `res/values/` e `res/values-it/tab_audio_strings.xml`, `test/.../TabAudioTest.kt`.
+
+### `0080`: gruppi di schede nella tab strip (facoltativa)
+
+Solo file nuovi: `patchfeatures/TabGroups.kt` (disposizione della tab strip con etichette e gruppi chiusi, schede da
+tenere vicine, scheda da selezionare uscendo da un gruppo), `TabGroupsFeature.kt` (gruppi letti dall'archivio di
+Firefox, `TabGroupRepository`; etichette, sottolineatura, menu, gruppi chiusi ricordati, gruppi attivi), `res/values/` e
+`res/values-it/tab_groups_strings.xml`, `test/.../TabGroupsTest.kt`. Per «Aggiungi a un gruppo» e «Modifica» usa la
+schermata dei gruppi di Firefox (`TabGroupFlowFragment`). La `0020` salta con Ctrl+Tab le schede nascoste.
 
 ## Differenze rispetto a Chrome
 

@@ -92,14 +92,23 @@ index b8b89301..952ab026 100644
              )
          }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
-index 63262fea..1fc3b514 100644
+index 63262fea..b52d63a7 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
-@@ -96,6 +96,9 @@ import org.mozilla.fenix.R
+@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.padding
+ import androidx.compose.foundation.layout.size
+ import androidx.compose.foundation.layout.width
+ import androidx.compose.foundation.lazy.LazyRow
+-import androidx.compose.foundation.lazy.itemsIndexed
+ import androidx.compose.foundation.lazy.rememberLazyListState
+ import androidx.compose.foundation.selection.selectableGroup
+ import androidx.compose.foundation.shape.CircleShape
+@@ -96,6 +95,10 @@ import org.mozilla.fenix.R
  import org.mozilla.fenix.compose.Favicon
  import org.mozilla.fenix.compose.ext.isItemPartiallyVisible
  import org.mozilla.fenix.home.ui.getAttr
 +import org.mozilla.fenix.patchfeatures.PatchFeatureHooks
++import org.mozilla.fenix.patchfeatures.TabStripEntry
 +import org.mozilla.fenix.patchfeatures.TabStripTabActions
 +import org.mozilla.fenix.patchfeatures.TabStripTabInfo
  import org.mozilla.fenix.tabstray.browser.compose.ReorderableDragItemContainer
@@ -139,7 +148,7 @@ index 63262fea..1fc3b514 100644
              )
  
              IconButton(onClick = onAddTabClick, contentDescription = stringResource(R.string.add_tab)) {
-@@ -253,6 +260,7 @@ private fun ChromeStyleTabsList(
+@@ -253,15 +260,21 @@ private fun ChromeStyleTabsList(
      onCloseTabClick: (id: String, isPrivate: Boolean) -> Unit,
      onSelectedTabClick: (tabId: String, url: String) -> Unit,
      onMove: (tabId: String, targetId: String, placeAfter: Boolean) -> Unit,
@@ -147,7 +156,24 @@ index 63262fea..1fc3b514 100644
  ) {
      BoxWithConstraints(modifier = modifier) {
          val listState = rememberLazyListState()
-@@ -281,6 +289,9 @@ private fun ChromeStyleTabsList(
+-        val availableWidth = maxWidth - stripHorizontalPadding * 2
++        // The optional features of the patch may hide tabs and add their own items, e.g. the labels of tab groups.
++        val entries = PatchFeatureHooks.tabStripEntries(state.tabs.map { it.toTabStripTabInfo() })
++        val tabsById = state.tabs.associateBy { it.id }
++        val shownTabCount = entries.count { it is TabStripEntry.Tab }
++        val itemsWidth = entries.fold(0.dp) { width, entry -> width + ((entry as? TabStripEntry.Item)?.width ?: 0.dp) }
++        val availableWidth = maxWidth - stripHorizontalPadding * 2 - itemsWidth
+         val fittingTabWidth =
+-            if (state.tabs.isEmpty()) {
++            if (shownTabCount == 0) {
+                 maxTabWidth
+             } else {
+-                (availableWidth / state.tabs.size).coerceIn(minTabWidth, maxTabWidth)
++                (availableWidth / shownTabCount).coerceIn(minTabWidth, maxTabWidth)
+             }
+ 
+         // Like Chrome, keep the tabs width for a moment after a tab is closed from the strip so that the close button
+@@ -281,6 +294,9 @@ private fun ChromeStyleTabsList(
  
          val newTabIds = rememberNewTabIds(state.tabs)
  
@@ -157,10 +183,12 @@ index 63262fea..1fc3b514 100644
          val reorderState =
              createListReorderState(
                  listState = listState,
-@@ -292,11 +303,14 @@ private fun ChromeStyleTabsList(
+@@ -291,12 +307,15 @@ private fun ChromeStyleTabsList(
+                         movedTab.index < adjacentTab.index,
                      )
                  },
-                 ignoredItems = emptyList(),
+-                ignoredItems = emptyList(),
++                ignoredItems = entries.mapNotNull { (it as? TabStripEntry.Item)?.key },
 +                onLongPress = { item -> menuTabId = item.key as String },
 +                onExitLongPress = { menuTabId = null },
              )
@@ -172,19 +200,105 @@ index 63262fea..1fc3b514 100644
                      .detectListPressAndDrag(
                          reorderState = reorderState,
                          listState = listState,
-@@ -332,6 +346,11 @@ private fun ChromeStyleTabsList(
-                             onCloseTabClick(id, isPrivate)
-                         },
-                         onSelectedTabClick = onSelectedTabClick,
-+                        isMenuShown = menuTabId == itemState.id,
-+                        hasOtherTabs = state.tabs.size > 1,
-+                        menuActions = tabMenuActions,
-+                        onShowMenu = { menuTabId = itemState.id },
-+                        onDismissMenu = { menuTabId = null },
-                         modifier =
-                             Modifier.thenConditional(
-                                 modifier = Modifier.semantics { traversalIndex = -1f },
-@@ -395,6 +414,11 @@ private fun ChromeStyleTabItem(
+@@ -307,37 +326,48 @@ private fun ChromeStyleTabsList(
+             contentPadding = PaddingValues(horizontal = stripHorizontalPadding),
+             verticalAlignment = Alignment.Bottom,
+         ) {
+-            itemsIndexed(
+-                items = state.tabs,
+-                key = { _, item -> item.id },
+-            ) { index, itemState ->
+-                val nextTab = state.tabs.getOrNull(index + 1)
+-                ReorderableDragItemContainer(
+-                    state = reorderState,
+-                    key = itemState.id,
+-                    position = index,
+-                ) {
+-                    ChromeStyleTabItem(
+-                        state = itemState,
+-                        width = tabWidth,
+-                        showCloseButton = itemState.isSelected || targetTabWidth >= minTabWidthForCloseButton,
+-                        showEndDivider = nextTab != null && !itemState.isSelected && !nextTab.isSelected,
+-                        isNewTab = itemState.id in newTabIds,
+-                        backgroundColors = tabItemBackgroundColors,
+-                        onCloseTabClick = { id, isPrivate ->
+-                            if (state.tabs.lastOrNull()?.id != id) {
+-                                frozenTabWidth = targetTabWidth
+-                                closeCount++
++            entries.forEachIndexed { index, entry ->
++                when (entry) {
++                    is TabStripEntry.Item -> item(key = entry.key) { entry.content() }
++                    is TabStripEntry.Tab -> {
++                        val itemState = tabsById.getValue(entry.id)
++                        val nextTab = (entries.getOrNull(index + 1) as? TabStripEntry.Tab)?.let { tabsById[it.id] }
++                        item(key = itemState.id) {
++                            ReorderableDragItemContainer(
++                                state = reorderState,
++                                key = itemState.id,
++                                position = index,
++                            ) {
++                                ChromeStyleTabItem(
++                                    state = itemState,
++                                    width = tabWidth,
++                                    showCloseButton =
++                                        itemState.isSelected || targetTabWidth >= minTabWidthForCloseButton,
++                                    showEndDivider = nextTab != null && !itemState.isSelected && !nextTab.isSelected,
++                                    isNewTab = itemState.id in newTabIds,
++                                    backgroundColors = tabItemBackgroundColors,
++                                    onCloseTabClick = { id, isPrivate ->
++                                        if (state.tabs.lastOrNull()?.id != id) {
++                                            frozenTabWidth = targetTabWidth
++                                            closeCount++
++                                        }
++                                        onCloseTabClick(id, isPrivate)
++                                    },
++                                    onSelectedTabClick = onSelectedTabClick,
++                                    isMenuShown = menuTabId == itemState.id,
++                                    hasOtherTabs = state.tabs.size > 1,
++                                    menuActions = tabMenuActions,
++                                    onShowMenu = { menuTabId = itemState.id },
++                                    onDismissMenu = { menuTabId = null },
++                                    modifier =
++                                        Modifier.thenConditional(
++                                            modifier = Modifier.semantics { traversalIndex = -1f },
++                                            predicate = { itemState.isSelected },
++                                        ),
++                                )
+                             }
+-                            onCloseTabClick(id, isPrivate)
+-                        },
+-                        onSelectedTabClick = onSelectedTabClick,
+-                        modifier =
+-                            Modifier.thenConditional(
+-                                modifier = Modifier.semantics { traversalIndex = -1f },
+-                                predicate = { itemState.isSelected },
+-                            ),
+-                    )
++                        }
++                    }
+                 }
+             }
+         }
+@@ -346,7 +376,7 @@ private fun ChromeStyleTabsList(
+             // When a new tab is added, scroll to the end of the list. This acts on state changes so it also works
+             // for tabs opened from any other place, e.g. the tabs tray or a link.
+             LaunchedEffect(state.tabs.last().id) {
+-                listState.scrollToItem(state.tabs.lastIndex)
++                if (entries.isNotEmpty()) listState.scrollToItem(entries.lastIndex)
+             }
+ 
+             // When a tab is selected, scroll to it if it isn't fully visible.
+@@ -357,7 +387,8 @@ private fun ChromeStyleTabsList(
+                         listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == selectedTab.id }
+ 
+                     if (selectedItemInfo == null || listState.isItemPartiallyVisible(selectedItemInfo)) {
+-                        listState.animateScrollToItem(state.tabs.indexOf(selectedTab))
++                        val index = entries.indexOfFirst { it is TabStripEntry.Tab && it.id == selectedTab.id }
++                        if (index >= 0) listState.animateScrollToItem(index)
+                     }
+                 }
+             }
+@@ -395,6 +426,11 @@ private fun ChromeStyleTabItem(
      backgroundColors: TabStripColors.TabColors,
      onCloseTabClick: (id: String, isPrivate: Boolean) -> Unit,
      onSelectedTabClick: (id: String, url: String) -> Unit,
@@ -196,7 +310,7 @@ index 63262fea..1fc3b514 100644
      modifier: Modifier = Modifier,
  ) {
      val folioColor = backgroundColors.get(isActive = true)
-@@ -427,114 +451,132 @@ private fun ChromeStyleTabItem(
+@@ -427,114 +463,132 @@ private fun ChromeStyleTabItem(
  
      val closeTabLabel = stringResource(R.string.close_tab)
  
@@ -227,7 +341,7 @@ index 63262fea..1fc3b514 100644
 -                    }
 -                },
 +    // The optional features of the patch may add to the tab, e.g. for the mouse.
-+    val tabInfo = TabStripTabInfo(state.id, state.title, state.url, state.isPrivate, state.isSelected)
++    val tabInfo = state.toTabStripTabInfo()
 +    PatchFeatureHooks.TabStripTab(
 +        tab = tabInfo,
 +        actions = TabStripTabActions(onClose = closeTab, onShowMenu = onShowMenu),
@@ -418,6 +532,12 @@ index 63262fea..1fc3b514 100644
          }
      }
  }
+@@ -722,3 +776,5 @@ private fun Modifier.fadingEdge(
+                 }
+             drawRect(brush = brush, blendMode = BlendMode.DstIn)
+         }
++
++private fun TabStripItem.toTabStripTabInfo() = TabStripTabInfo(id, title, url, isPrivate, isSelected)
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
 index 91f7571e..cd5535d0 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
@@ -823,10 +943,10 @@ index c1741b4e..add1f644 100644
          }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
 new file mode 100644
-index 00000000..aef85f5e
+index 00000000..a9e8f916
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
-@@ -0,0 +1,391 @@
+@@ -0,0 +1,441 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -842,6 +962,7 @@ index 00000000..aef85f5e
 +import androidx.compose.foundation.lazy.LazyListState
 +import androidx.compose.runtime.Composable
 +import androidx.compose.ui.Modifier
++import androidx.compose.ui.unit.Dp
 +import androidx.fragment.app.DialogFragment
 +import androidx.preference.PreferenceFragmentCompat
 +import kotlinx.coroutines.flow.MutableSharedFlow
@@ -997,6 +1118,31 @@ index 00000000..aef85f5e
 +    val onShowMenu: () -> Unit,
 +)
 +
++/** What the tab strip shows, in order: its tabs and the items of an optional feature, see [PatchFeatureHooks]. */
++sealed interface TabStripEntry {
++    /**
++     * A tab of the tab strip.
++     *
++     * @property id The id of the tab.
++     */
++    data class Tab(
++        val id: String,
++    ) : TabStripEntry
++
++    /**
++     * An item that an optional feature shows in the tab strip, e.g. the label of a tab group.
++     *
++     * @property key The key of the item, unique in the tab strip and different from the ids of the tabs.
++     * @property width About how wide the item is, which the tabs leave free when they shrink to fit.
++     * @property content The item.
++     */
++    class Item(
++        val key: String,
++        val width: Dp,
++        val content: @Composable () -> Unit,
++    ) : TabStripEntry
++}
++
 +/**
 + * Entry point of an optional feature, which the code of the mandatory patches calls (see [all]): every optional patch
 + * defines an object implementing it, named after the patch (e.g. `TabGroupsFeature` for `0080-tab-groups.patch`).
@@ -1030,6 +1176,22 @@ index 00000000..aef85f5e
 +        actions: TabStripTabActions,
 +        content: @Composable () -> Unit,
 +    ) = content()
++
++    /**
++     * Arranges the tab strip: returns what it shows for [tabs], in order (the feature may hide some tabs, show them in
++     * another order and add its own items between them), or `null` to show the tabs as they are. Only the first
++     * feature that arranges the tab strip is used.
++     *
++     * @param tabs The tabs of the tab strip, in order.
++     */
++    @Composable
++    fun tabStripEntries(tabs: List<TabStripTabInfo>): List<TabStripEntry>? = null
++
++    /**
++     * Whether the tab with [tabId] is hidden in the tab strip by the feature (see [tabStripEntries]), so that e.g.
++     * the keyboard shortcuts that go to the next tab skip it.
++     */
++    fun isTabHidden(tabId: String): Boolean = false
 +
 +    /**
 +     * Icons the feature adds to a tab of the tab strip, after its title (on narrow tabs the title shrinks first).
@@ -1182,6 +1344,14 @@ index 00000000..aef85f5e
 +                hooks.first().TabStripTab(tab, actions) { TabStripTabOf(hooks.drop(1), tab, actions, content) }
 +            }
 +        }
++
++        /** What the tab strip shows for [tabs], see [PatchFeatureHooks.tabStripEntries]. */
++        @Composable
++        fun tabStripEntries(tabs: List<TabStripTabInfo>): List<TabStripEntry> =
++            all.map { it.tabStripEntries(tabs) }.firstOrNull { it != null } ?: tabs.map { TabStripEntry.Tab(it.id) }
++
++        /** Whether an optional feature hides the tab with [tabId], see [PatchFeatureHooks.isTabHidden]. */
++        fun isTabHiddenInTabStrip(tabId: String): Boolean = all.any { it.isTabHidden(tabId) }
 +
 +        /** The icons of the optional features for a tab of the tab strip, see [PatchFeatureHooks.TabStripTabIcons]. */
 +        @Composable

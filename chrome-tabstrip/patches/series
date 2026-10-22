@@ -19,3 +19,4 @@
 0050-bookmarks-bar.patch                        | facoltativa  | Barra dei segnalibri | Bookmarks toolbar
 0060-mouse.patch                                | facoltativa  | Mouse e trackpad | Mouse and trackpad
 0070-tab-audio.patch                            | facoltativa  | Icona audio sulle schede | Audio icon on the tabs
+0080-tab-groups.patch                           | facoltativa  | Gruppi di schede nella tab strip | Tab groups in the tab strip
