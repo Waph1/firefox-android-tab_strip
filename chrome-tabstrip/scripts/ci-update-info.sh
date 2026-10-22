@@ -13,7 +13,7 @@ APK_URL="${2:-}"
 FIREFOX_DIR="${3:-}"
 [ -f "$APK" ] && [ -n "$APK_URL" ] && [ -n "$FIREFOX_DIR" ] ||
     die "uso: $0 <file.apk> <url-da-cui-scaricare-l-apk> <cartella-firefox>"
-FEATURES="$(python3 "$(dirname "$0")/patch_features.py" json "$SERIES_FILE" "$(applied_file "$FIREFOX_DIR")")"
+FEATURES="$(python3 "$PATCH_ROOT/scripts/patch_features.py" json "$SERIES_FILE" "$(applied_file "$FIREFOX_DIR")")"
 
 BUILD_TOOLS="$(find "${MOZBUILD_STATE_PATH:-$HOME/.mozbuild}" -path '*/build-tools/*/apksigner' | sort -V | tail -1)"
 [ -n "$BUILD_TOOLS" ] || die "build-tools non trovati nell'Android SDK"

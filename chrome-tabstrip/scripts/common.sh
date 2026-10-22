@@ -148,7 +148,7 @@ save_applied() {
     fi
     printf '%s\n' "${APPLIED[@]}" >"$file"
     if [ -f "$dir/$PATCH_FEATURES_API_FILE" ]; then
-        python3 "$(dirname "${BASH_SOURCE[0]}")/patch_features.py" kotlin "$SERIES_FILE" "$file" \
+        python3 "$PATCH_ROOT/scripts/patch_features.py" kotlin "$SERIES_FILE" "$file" \
             >"$dir/$GENERATED_FEATURES_FILE"
     fi
 }
