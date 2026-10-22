@@ -18,3 +18,4 @@
 0040-page-zoom.patch                            | facoltativa  | Zoom delle pagine come su computer | Desktop-like page zoom
 0050-bookmarks-bar.patch                        | facoltativa  | Barra dei segnalibri | Bookmarks toolbar
 0060-mouse.patch                                | facoltativa  | Mouse e trackpad | Mouse and trackpad
+0070-tab-audio.patch                            | facoltativa  | Icona audio sulle schede | Audio icon on the tabs
