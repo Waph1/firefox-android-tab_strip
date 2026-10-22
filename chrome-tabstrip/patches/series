@@ -20,3 +20,4 @@
 0060-mouse.patch                                | facoltativa  | Mouse e trackpad | Mouse and trackpad
 0070-tab-audio.patch                            | facoltativa  | Icona audio sulle schede | Audio icon on the tabs
 0080-tab-groups.patch                           | facoltativa  | Gruppi di schede nella tab strip | Tab groups in the tab strip
+0090-crash-reports.patch                        | facoltativa  | Segnalazioni dei crash su GitHub | Crash reports on GitHub

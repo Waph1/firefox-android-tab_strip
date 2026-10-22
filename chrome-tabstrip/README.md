@@ -250,6 +250,16 @@ sono elencate in **Impostazioni → Informazioni su Firefox → Funzioni della p
     schede: sparisce dalla tab strip e si riapre da lì.
   - I gruppi creati nella panoramica delle schede compaiono nella tab strip e viceversa. Le schede private non hanno
     gruppi, come in Firefox.
+- **Segnalazioni dei crash su GitHub** (`0090`): le segnalazioni dei crash non vanno più a Mozilla (che non corregge
+  i crash di un Firefox modificato) ma a questo repository, per poterli correggere.
+  - Dopo un crash Firefox chiede, come sempre, se inviare la segnalazione (la finestra ora dice «a GitHub»).
+    Inviandola compare una **notifica** «Segnalazione del crash pronta»: toccandola si apre in Firefox una **nuova
+    issue già compilata** (tipo di crash, versione, funzioni della patch incluse e mancanti, telefono, ultime azioni
+    dell'app e lo stack dell'errore). Si controlla e si invia con «Submit new issue»: serve essere collegati a GitHub.
+  - L'app non contiene chiavi di GitHub e non invia nulla da sola. La stessa issue si riapre dall'elenco dei crash
+    (scrivendo `about:crashes` nella barra degli indirizzi), anche se le notifiche di Firefox sono disattivate.
+  - Per i crash del motore Gecko (codice nativo) la issue dice solo in quale processo è avvenuto: il minidump resta
+    sul telefono. Sono quasi sempre problemi di Mozilla, non della patch.
 
 ## Versione di Firefox
 
@@ -291,7 +301,7 @@ chrome-tabstrip/scripts/apply.sh ~/firefox tab-groups                 # obbligat
 # ... modifica il codice, compila, prova ...
 chrome-tabstrip/scripts/refresh.sh ~/firefox                          # rigenera patches/0080-tab-groups.patch
 
-chrome-tabstrip/scripts/refresh.sh ~/firefox 0090-nuova-funzione.patch  # crea una patch nuova con le modifiche
+chrome-tabstrip/scripts/refresh.sh ~/firefox 0100-nuova-funzione.patch  # crea una patch nuova con le modifiche
                                                                         # fatte sopra le patch applicate
 chrome-tabstrip/scripts/unapply.sh ~/firefox tab-groups               # toglie solo quella facoltativa
 ```
@@ -462,7 +472,8 @@ menu in un'altra finestra, `PatchFeatureHooks.menuDialog`: in quel caso niente m
 delle funzioni facoltative in cima al menu, `PatchFeatureHooks.MainMenuItems`), `CustomizationFragment.kt`
 (preferenze delle funzioni facoltative in Impostazioni → Personalizza, `PatchFeatureHooks.addCustomizationPreferences`);
 in `HomeActivity.kt` anche l'avvio delle funzioni facoltative (`PatchFeatureHooks.onActivityCreated`).
-`ChromeStyleTabStrip.kt` (della `0001`) lascia aggiungere qualcosa a ogni scheda (`PatchFeatureHooks.TabStripTab`, con
+`Analytics.kt` lascia a una funzione facoltativa decidere dove vanno le segnalazioni dei crash
+(`PatchFeatureHooks.crashReporting`). `ChromeStyleTabStrip.kt` (della `0001`) lascia aggiungere qualcosa a ogni scheda (`PatchFeatureHooks.TabStripTab`, con
 le azioni chiudi e mostra il menu), icone dopo il titolo (`PatchFeatureHooks.TabStripTabIcons`) e qualcosa alla lista
 delle schede (`PatchFeatureHooks.tabStripModifier`); una funzione facoltativa può anche disporre la tab strip, con
 elementi propri tra le schede e schede nascoste (`PatchFeatureHooks.tabStripEntries`, `isTabHidden`).
@@ -524,6 +535,12 @@ tenere vicine, scheda da selezionare uscendo da un gruppo), `TabGroupsFeature.kt
 Firefox, `TabGroupRepository`; etichette, sottolineatura, menu, gruppi chiusi ricordati, gruppi attivi), `res/values/` e
 `res/values-it/tab_groups_strings.xml`, `test/.../TabGroupsTest.kt`. Per «Aggiungi a un gruppo» e «Modifica» usa la
 schermata dei gruppi di Firefox (`TabGroupFlowFragment`). La `0020` salta con Ctrl+Tab le schede nascoste.
+
+### `0090`: segnalazioni dei crash su GitHub (facoltativa)
+
+Solo file nuovi: `patchfeatures/CrashReports.kt` (titolo, dettagli e stack della issue, indirizzo entro il limite di
+lunghezza di GitHub), `CrashReportsFeature.kt` (il servizio che sostituisce quello di Mozilla e mostra la notifica),
+`res/values/` e `res/values-it/crash_reports_strings.xml`, `test/.../CrashReportsTest.kt`.
 
 ## Differenze rispetto a Chrome
 
