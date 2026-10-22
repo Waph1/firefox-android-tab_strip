@@ -180,11 +180,18 @@ jobs:
           fi
           chrome-tabstrip/scripts/ci-release-notes.sh "$UPDATE_INFO" "$(basename "$APK")" "$FX_VERSION" \
             > "$RUNNER_TEMP/notes.md"
+          TITLE="Firefox $FX_VERSION con tab strip in stile Chrome"
+          # Una Release che esiste già viene aggiornata, non cancellata e ricreata: se qualcosa va storto resta quella
+          # vecchia. L'APK va prima di update.json, che lo indica all'app. Il tag resta dov'era, e quello di una
+          # Release nuova va sul ramo principale: il token di GitHub Actions non può creare un tag su un commit con
+          # i workflow diversi da quelli del ramo principale (HTTP 403). Il commit delle patch è nella descrizione.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release delete "$TAG" --yes --cleanup-tag
+            gh release upload "$TAG" "$APK" --clobber
+            gh release upload "$TAG" "$UPDATE_INFO" --clobber
+            gh release edit "$TAG" --title "$TITLE" --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh release create "$TAG" "$APK" "$UPDATE_INFO" --title "$TITLE" --notes-file "$RUNNER_TEMP/notes.md"
           fi
-          gh release create "$TAG" "$APK" "$UPDATE_INFO" --target "$GITHUB_SHA" \
-            --title "Firefox $FX_VERSION con tab strip in stile Chrome" --notes-file "$RUNNER_TEMP/notes.md"
           echo "✅ Pubblicato: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Allega l'APK all'esecuzione (modalità test)
