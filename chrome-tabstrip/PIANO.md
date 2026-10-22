@@ -19,7 +19,7 @@ schermo grande" compare e sparisce **al volo** aprendo e chiudendo il telefono, 
 | 1  | Nuova scheda con la barra degli indirizzi attiva  | `0010-new-tab-focus`         | facoltativa | fatto        |
 | 2  | Scorciatoie da tastiera fisica                    | `0020-keyboard-shortcuts`    | facoltativa | fatto        |
 | 3  | Menu ⋮ a tendina                                  | `0030-dropdown-menu`         | facoltativa | fatto        |
-| 4  | Zoom della pagina come su desktop                 | `0040-page-zoom`             | facoltativa | da fare      |
+| 4  | Zoom della pagina come su desktop                 | `0040-page-zoom`             | facoltativa | fatto        |
 | 5  | Barra dei segnalibri                              | `0050-bookmarks-bar`         | facoltativa | da fare      |
 | 6  | Mouse e trackpad                                  | `0060-mouse`                 | facoltativa | da fare      |
 | 7  | Icona audio sulle schede                          | `0070-tab-audio`             | facoltativa | da fare      |
@@ -206,6 +206,12 @@ all'estensione.
 Non vale per: visualizzatore PDF (ha il suo zoom), modalità lettura, pagine interne di Firefox. Limite noto: su
 qualche sito particolare (editor, mappe) lo zoom CSS può dare piccoli difetti; si risolve rimettendo quel sito al
 100%.
+
+**Fatto**, con i punti di aggancio `onActivityCreated`, `MainMenuItems` e `addCustomizationPreferences` della
+`0002`. Differenza dal piano: **niente percentuale nella barra degli indirizzi**, perché richiederebbe di modificare
+a fondo la costruzione della toolbar di Firefox (il codice che upstream cambia più spesso). Al suo posto: la
+percentuale è sempre nella riga Zoom del menu (toccandola si torna allo zoom predefinito) e Ctrl + / − / 0 mostrano
+per un attimo il nuovo zoom.
 
 ---
 

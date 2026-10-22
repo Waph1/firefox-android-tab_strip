@@ -219,6 +219,18 @@ sono elencate in **Impostazioni → Informazioni su Firefox → Funzioni della p
   schermo piccolo, e per le schede aperte da altre app, resta il pannello dal basso. La tendina si posiziona in base
   all'altezza di tab strip e barra degli indirizzi; se si apre o si chiude il telefono con il menu aperto, resta
   com'è fino alla chiusura.
+- **Zoom delle pagine come su computer** (`0040`), **solo a schermo grande**: la pagina si ingrandisce e si
+  riorganizza come con lo zoom di Firefox per computer (livelli 30–300%).
+  - **Zoom predefinito** in Impostazioni → Personalizza → «Zoom delle pagine (schermo grande)», dove si può anche
+    azzerare lo zoom di tutti i siti.
+  - **Zoom per sito**, ricordato per ogni sito; nelle schede private vale solo finché restano aperte.
+  - Si cambia dal menu ⋮, con la riga **Zoom − 110% +** (toccando la percentuale si torna allo zoom predefinito), o
+    con **Ctrl + / Ctrl − / Ctrl 0**, che mostrano per un attimo il nuovo zoom.
+  - Chiudendo il telefono le pagine tornano al 100%; riaprendolo torna lo zoom scelto, al volo.
+
+  GeckoView non offre lo zoom delle pagine di Firefox per computer: lo applica un'estensione interna e invisibile
+  (la proprietà CSS `zoom`), quindi il PDF, la modalità lettura e le pagine interne di Firefox non si ingrandiscono, e
+  su qualche sito particolare (editor, mappe) possono esserci piccoli difetti: basta rimettere quel sito al 100%.
 
 ## Versione di Firefox
 
@@ -430,7 +442,10 @@ funzioni facoltative, con `PatchFeatureHooks.openNewTab`), `BaseBrowserFragment.
 (messaggio «Schede chiuse» con Annulla dopo «Chiudi le altre schede»), `HomeActivity.kt` (i tasti passano prima dalle
 funzioni facoltative, `PatchFeatureHooks.onKeyEvent`, che compaiono anche nella schermata delle scorciatoie di
 Android, `PatchFeatureHooks.keyboardShortcuts`), `MenuDialogFragment.kt` (una funzione facoltativa può mostrare il
-menu in un'altra finestra, `PatchFeatureHooks.menuDialog`: in quel caso niente maniglia e angoli tutti arrotondati).
+menu in un'altra finestra, `PatchFeatureHooks.menuDialog`: in quel caso niente maniglia e angoli tutti arrotondati), `MainMenu.kt` (voci
+delle funzioni facoltative in cima al menu, `PatchFeatureHooks.MainMenuItems`), `CustomizationFragment.kt`
+(preferenze delle funzioni facoltative in Impostazioni → Personalizza, `PatchFeatureHooks.addCustomizationPreferences`);
+in `HomeActivity.kt` anche l'avvio delle funzioni facoltative (`PatchFeatureHooks.onActivityCreated`).
 
 ### `0010`: nuova scheda con la barra degli indirizzi attiva (facoltativa)
 
@@ -449,6 +464,14 @@ toolbar, il menu come il tasto Menu), `res/values/` e `res/values-it/keyboard_sh
 
 Solo file nuovi: `patchfeatures/DropdownMenuFeature.kt` (la finestra a tendina e la sua posizione) e
 `test/.../DropdownMenuFeatureTest.kt`.
+
+### `0040`: zoom delle pagine come su computer (facoltativa)
+
+Solo file nuovi: `assets/extensions/chrome-tabstrip-zoom/` (l'estensione interna: lo script in background riceve gli
+zoom dall'app e li manda alle pagine, lo script delle pagine applica `zoom` all'elemento radice),
+`patchfeatures/PageZoom.kt` (livelli, zoom per sito, scorciatoie), `PageZoomFeature.kt` (installazione
+dell'estensione, impostazioni salvate, riga del menu, preferenze, Ctrl + / − / 0), `res/values/` e
+`res/values-it/page_zoom_strings.xml`, `test/.../PageZoomTest.kt`.
 
 ## Differenze rispetto a Chrome
 
