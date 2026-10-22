@@ -254,6 +254,11 @@ sono elencate in **Impostazioni → Informazioni su Firefox → Funzioni della p
 
   Le schede e il pulsante di chiusura si evidenziano già sotto il mouse in Firefox. Per la barra dei segnalibri
   (clic centrale, Ctrl+clic, clic destro) vedi la funzione `0050`.
+- **Icona audio sulle schede** (`0070`), come in Chrome: una scheda che sta riproducendo audio mostra un
+  **altoparlante** dopo il titolo, una scheda silenziata un altoparlante barrato. Toccare l'icona silenzia o riattiva
+  l'audio della scheda, come la voce «Disattiva audio della scheda» / «Riattiva audio della scheda» del menu della
+  scheda. Sulle schede strette si accorcia prima il titolo. L'icona segue gli elementi audio e video della pagina: i
+  suoni di qualche gioco che non li usa non la mostrano.
 
 ## Versione di Firefox
 
@@ -470,7 +475,8 @@ delle funzioni facoltative in cima al menu, `PatchFeatureHooks.MainMenuItems`), 
 (preferenze delle funzioni facoltative in Impostazioni → Personalizza, `PatchFeatureHooks.addCustomizationPreferences`);
 in `HomeActivity.kt` anche l'avvio delle funzioni facoltative (`PatchFeatureHooks.onActivityCreated`).
 `ChromeStyleTabStrip.kt` (della `0001`) lascia aggiungere qualcosa a ogni scheda (`PatchFeatureHooks.TabStripTab`, con
-le azioni chiudi e mostra il menu) e alla lista delle schede (`PatchFeatureHooks.tabStripModifier`).
+le azioni chiudi e mostra il menu), icone dopo il titolo (`PatchFeatureHooks.TabStripTabIcons`) e qualcosa alla lista
+delle schede (`PatchFeatureHooks.tabStripModifier`).
 `BrowserToolbarComposable.kt` e `HomeToolbarComposable.kt` mostrano accanto alla barra degli indirizzi le righe delle
 funzioni facoltative (`PatchFeatureHooks.AddressBarRow`), `ext/Fragment.kt` ne conta l'altezza nello spazio che le
 pagine lasciano alle barre (`PatchFeatureHooks.addressBarRowHeight`) e `BaseBrowserFragment.kt` lo ricalcola quando
@@ -515,6 +521,12 @@ sincronizzazione, apertura dei segnalibri come fa la home, impostazione), `res/v
 Solo file nuovi: `patchfeatures/Mouse.kt` (scorrimento con la rotella, posizione del suggerimento, sito della scheda),
 `MouseFeature.kt` (clic centrale e destro e suggerimento sulle schede, rotella sulla tab strip),
 `test/.../MouseTest.kt`.
+
+### `0070`: icona audio sulle schede (facoltativa)
+
+Solo file nuovi: `patchfeatures/TabAudio.kt` (quale icona mostrare dallo stato della «media session» della scheda),
+`TabAudioFeature.kt` (l'icona, il tocco e la voce del menu della scheda, che silenziano con il controller della media
+session), `res/values/` e `res/values-it/tab_audio_strings.xml`, `test/.../TabAudioTest.kt`.
 
 ## Differenze rispetto a Chrome
 

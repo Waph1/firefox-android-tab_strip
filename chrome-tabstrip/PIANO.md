@@ -22,7 +22,7 @@ schermo grande" compare e sparisce **al volo** aprendo e chiudendo il telefono, 
 | 4  | Zoom della pagina come su desktop                 | `0040-page-zoom`             | facoltativa | fatto        |
 | 5  | Barra dei segnalibri                              | `0050-bookmarks-bar`         | facoltativa | fatto        |
 | 6  | Mouse e trackpad                                  | `0060-mouse`                 | facoltativa | fatto        |
-| 7  | Icona audio sulle schede                          | `0070-tab-audio`             | facoltativa | da fare      |
+| 7  | Icona audio sulle schede                          | `0070-tab-audio`             | facoltativa | fatto        |
 | 8  | Gruppi di schede nella tab strip                  | `0080-tab-groups`            | facoltativa | da fare      |
 
 L'ordine della tabella è l'ordine di lavoro: prima l'infrastruttura, poi dal più semplice e utile al più complesso e
@@ -271,6 +271,9 @@ anche il sito della scheda, come in Chrome.
 **Come:** con lo stato "media session" che Firefox tiene già per ogni scheda (riproduzione in corso, silenziata).
 Limite noto: i siti che producono suoni senza un elemento audio/video (alcuni giochi) potrebbero non mostrare
 l'icona.
+
+**Fatto**, con il nuovo punto di aggancio `TabStripTabIcons` della `0002` (e `tabStripMenuItems` per il menu). La voce
+del menu compare solo per le schede con audio o video, le sole che si possono silenziare.
 
 ---
 

@@ -92,7 +92,7 @@ index b8b89301..952ab026 100644
              )
          }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
-index 63262fea..c2a545d7 100644
+index 63262fea..1fc3b514 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
 @@ -96,6 +96,9 @@ import org.mozilla.fenix.R
@@ -196,7 +196,7 @@ index 63262fea..c2a545d7 100644
      modifier: Modifier = Modifier,
  ) {
      val folioColor = backgroundColors.get(isActive = true)
-@@ -427,114 +451,128 @@ private fun ChromeStyleTabItem(
+@@ -427,114 +451,132 @@ private fun ChromeStyleTabItem(
  
      val closeTabLabel = stringResource(R.string.close_tab)
  
@@ -227,8 +227,9 @@ index 63262fea..c2a545d7 100644
 -                    }
 -                },
 +    // The optional features of the patch may add to the tab, e.g. for the mouse.
++    val tabInfo = TabStripTabInfo(state.id, state.title, state.url, state.isPrivate, state.isSelected)
 +    PatchFeatureHooks.TabStripTab(
-+        tab = TabStripTabInfo(state.id, state.title, state.url, state.isPrivate, state.isSelected),
++        tab = tabInfo,
 +        actions = TabStripTabActions(onClose = closeTab, onShowMenu = onShowMenu),
      ) {
 -        Row(
@@ -372,6 +373,9 @@ index 63262fea..c2a545d7 100644
                  }
 -            } else {
 -                Spacer(modifier = Modifier.width(tabContentEndPadding))
++
++                // Icons of the optional features of the patch, e.g. the audio one.
++                PatchFeatureHooks.TabStripTabIcons(tabInfo)
 +
 +                if (showCloseButton) {
 +                    val closeButtonDescription = stringResource(id = R.string.close_tab_title, state.title)
@@ -819,10 +823,10 @@ index c1741b4e..add1f644 100644
          }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
 new file mode 100644
-index 00000000..7bf0a1dc
+index 00000000..aef85f5e
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
-@@ -0,0 +1,377 @@
+@@ -0,0 +1,391 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -1028,6 +1032,14 @@ index 00000000..7bf0a1dc
 +    ) = content()
 +
 +    /**
++     * Icons the feature adds to a tab of the tab strip, after its title (on narrow tabs the title shrinks first).
++     *
++     * @param tab The tab.
++     */
++    @Composable
++    fun TabStripTabIcons(tab: TabStripTabInfo) = Unit
++
++    /**
 +     * Modifier the feature adds to the list of the tabs of the tab strip, e.g. to scroll it with the mouse wheel.
 +     *
 +     * @param listState The scroll state of the list.
@@ -1169,6 +1181,12 @@ index 00000000..7bf0a1dc
 +            } else {
 +                hooks.first().TabStripTab(tab, actions) { TabStripTabOf(hooks.drop(1), tab, actions, content) }
 +            }
++        }
++
++        /** The icons of the optional features for a tab of the tab strip, see [PatchFeatureHooks.TabStripTabIcons]. */
++        @Composable
++        fun TabStripTabIcons(tab: TabStripTabInfo) {
++            all.forEach { it.TabStripTabIcons(tab) }
 +        }
 +
 +        /** The modifiers of the optional features for the list of tabs, see [PatchFeatureHooks.tabStripModifier]. */
