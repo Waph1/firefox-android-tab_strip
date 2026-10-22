@@ -177,6 +177,17 @@ Gli APK pubblicati nelle Release si aggiornano da soli, come le app installate f
 Le build compilate sul computer (firmate con un'altra chiave) e le varianti `nightly`/`debug` non propongono mai
 aggiornamenti. Chi usa un fork con le proprie Release deve cambiare `UPDATE_INFO_URL` in `SelfUpdater.kt`.
 
+### Funzioni facoltative
+
+Ognuna ha la propria patch (vedi «Patch obbligatorie e facoltative»); le funzioni incluse nella versione installata
+sono elencate in **Impostazioni → Informazioni su Firefox → Funzioni della patch**.
+
+- **Nuova scheda con la barra degli indirizzi attiva** (`0010`): il pulsante **"+"** della tab strip, dalle pagine
+  e dalla home, apre la nuova scheda con la barra degli indirizzi **già selezionata**, pronta per scrivere un
+  indirizzo o una ricerca (con la tastiera a schermo, se non c'è una tastiera fisica). La scheda nuova è privata se
+  la tab strip mostra le schede private. Upstream la barra viene selezionata solo con alcune impostazioni della home
+  (ad es. non quando la home è mostrata in una scheda propria).
+
 ## Versione di Firefox
 
 La patch segue le **versioni stabili** di Firefox per Android: gli script scaricano automaticamente l'ultima
@@ -313,6 +324,9 @@ Il workflow [`.github/workflows/chrome-tabstrip.yml`](../.github/workflows/chrom
 - una Release con funzioni mancanti viene **ricompilata** (stessa versione di Firefox, `versionCode` più alto, quindi
   proposta come aggiornamento) appena le patch cambiano, cioè dopo che sono state sistemate; finché restano uguali
   non si ricompila, così non arriva un'e-mail al giorno;
+- prima di pubblicare controlla che il `versionCode` del nuovo APK (le ore passate dal 2014 all'ora della
+  compilazione) superi quello dell'ultima Release, altrimenti l'app non lo proporrebbe come aggiornamento: due
+  compilazioni nella stessa ora si fermano qui, e basta rilanciare il workflow un'ora dopo;
 - a ogni push che modifica le patch o gli script verifica che le patch si applichino;
 - a mano (**Actions → Chrome-like tab strip → Run workflow**) fa le stesse cose; con *mode = test* compila con una
   chiave temporanea e allega l'APK all'esecuzione invece di pubblicarlo (utile per provare una versione diversa
@@ -379,8 +393,15 @@ Modifiche ai file della `0001`: `SelfUpdater.kt` (funzioni mancanti nella finest
 questa versione»), `ChromeStyleTabStrip.kt` (menu con la pressione prolungata), `AboutFragment.kt`, `AboutItem.kt`
 (voce «Funzioni della patch»).
 
-Modifiche piccole ai file esistenti: `TabStrip.kt` (azioni del menu), `BaseBrowserFragment.kt`, `HomeFragment.kt`
+Modifiche piccole ai file esistenti: `TabStrip.kt` (azioni del menu; il "+" lascia aprire la nuova scheda alle
+funzioni facoltative, con `PatchFeatureHooks.openNewTab`), `BaseBrowserFragment.kt`, `HomeFragment.kt`
 (messaggio «Schede chiuse» con Annulla dopo «Chiudi le altre schede»).
+
+### `0010`: nuova scheda con la barra degli indirizzi attiva (facoltativa)
+
+Solo file nuovi: `patchfeatures/NewTabFocusFeature.kt` apre la nuova scheda come Firefox (una scheda con la home, se
+la home è mostrata in una scheda propria) e poi mostra la home con la barra degli indirizzi selezionata
+(`focusOnAddressBar`, lo stesso argomento che Firefox usa altrove); `test/.../NewTabFocusFeatureTest.kt`.
 
 ## Differenze rispetto a Chrome
 

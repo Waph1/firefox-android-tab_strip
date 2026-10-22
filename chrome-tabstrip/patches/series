@@ -12,3 +12,4 @@
 
 0001-fenix-chrome-like-adaptive-tab-strip.patch | obbligatoria | Tab strip in stile Chrome | Chrome-like tab strip
 0002-fenix-patch-features.patch                 | obbligatoria | Funzioni facoltative e menu delle schede | Optional features and tab menu
+0010-new-tab-focus.patch                        | facoltativa  | Nuova scheda con la barra degli indirizzi attiva | New tab with the address bar focused

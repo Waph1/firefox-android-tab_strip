@@ -169,6 +169,15 @@ jobs:
         env:
           TAG: ${{ steps.plan.outputs.tag }}
         run: |
+          # Firefox propone l'aggiornamento solo se il versionCode (le ore passate dal 2014 all'ora della compilazione)
+          # supera quello dell'ultima Release: due compilazioni nella stessa ora avrebbero lo stesso versionCode.
+          versionCode() { python3 -c 'import json, sys; print(json.load(sys.stdin).get("versionCode", 0))'; }
+          LATEST="$(gh release download --pattern update.json --output - 2>/dev/null | versionCode || echo 0)"
+          NEW="$(versionCode < "$UPDATE_INFO")"
+          if [ "$NEW" -le "$LATEST" ]; then
+            echo "::error::Il versionCode $NEW non supera quello dell'ultima Release ($LATEST): l'app non proporrebbe l'aggiornamento. Rilancia il workflow tra un'ora."
+            exit 1
+          fi
           chrome-tabstrip/scripts/ci-release-notes.sh "$UPDATE_INFO" "$(basename "$APK")" "$FX_VERSION" \
             > "$RUNNER_TEMP/notes.md"
           if gh release view "$TAG" >/dev/null 2>&1; then

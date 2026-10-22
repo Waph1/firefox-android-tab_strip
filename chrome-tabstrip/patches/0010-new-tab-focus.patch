@@ -1,0 +1,105 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/NewTabFocusFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/NewTabFocusFeature.kt
+new file mode 100644
+index 00000000..1c513d55
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/NewTabFocusFeature.kt
+@@ -0,0 +1,52 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import androidx.navigation.NavController
++import androidx.navigation.findNavController
++import org.mozilla.fenix.HomeActivity
++import org.mozilla.fenix.NavGraphDirections
++import org.mozilla.fenix.R
++import org.mozilla.fenix.ext.components
++
++/**
++ * Optional feature "new tab with the address bar focused" (`0010-new-tab-focus.patch`): the new tab button of the tab
++ * strip opens a new tab with the address bar already focused, ready to type an address or a search, whatever the
++ * settings of the homepage (upstream focuses it only with some of them).
++ */
++object NewTabFocusFeature : PatchFeatureHooks {
++    override fun openNewTab(activity: HomeActivity): Boolean {
++        openNewTabWithFocus(
++            isPrivate = activity.browsingModeManager.mode.isPrivate,
++            isHomepageAsNewTab = activity.components.settings.enableHomepageAsNewTab,
++            addHomepageTab = { isPrivate ->
++                activity.components.useCases.fenixBrowserUseCases.addNewHomepageTab(private = isPrivate)
++            },
++            navController = activity.findNavController(R.id.container),
++        )
++        return true
++    }
++}
++
++/**
++ * Opens a new tab like Firefox does, then shows the homepage with the address bar focused.
++ *
++ * @param isPrivate Whether the new tab is private, like the tabs shown by the tab strip.
++ * @param isHomepageAsNewTab Whether Firefox shows the homepage in a new tab of its own (otherwise the homepage is shown
++ *   without a tab, and the tab is created when an address or a search is entered).
++ * @param addHomepageTab Adds and selects a new homepage tab, private or not.
++ * @param navController The [NavController] used to show the homepage.
++ */
++internal fun openNewTabWithFocus(
++    isPrivate: Boolean,
++    isHomepageAsNewTab: Boolean,
++    addHomepageTab: (isPrivate: Boolean) -> Unit,
++    navController: NavController,
++) {
++    if (isHomepageAsNewTab) {
++        addHomepageTab(isPrivate)
++    }
++    navController.navigate(NavGraphDirections.actionGlobalHome(focusOnAddressBar = true))
++}
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/NewTabFocusFeatureTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/NewTabFocusFeatureTest.kt
+new file mode 100644
+index 00000000..d36d404b
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/NewTabFocusFeatureTest.kt
+@@ -0,0 +1,41 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import androidx.navigation.NavController
++import io.mockk.mockk
++import io.mockk.verify
++import io.mockk.verifyOrder
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import org.mozilla.fenix.NavGraphDirections
++
++class NewTabFocusFeatureTest {
++    private val navController: NavController = mockk(relaxed = true)
++    private val addHomepageTab: (Boolean) -> Unit = mockk(relaxed = true)
++
++    @Test
++    fun `GIVEN the homepage has no tab of its own WHEN a new tab is opened THEN the homepage is focused`() {
++        openNewTabWithFocus(isPrivate = false, isHomepageAsNewTab = false, addHomepageTab, navController)
++
++        verify(exactly = 0) { addHomepageTab(any()) }
++        verify { navController.navigate(NavGraphDirections.actionGlobalHome(focusOnAddressBar = true)) }
++    }
++
++    @Test
++    fun `GIVEN the homepage is shown in a new tab WHEN a new tab is opened THEN it is added, then focused`() {
++        openNewTabWithFocus(isPrivate = true, isHomepageAsNewTab = true, addHomepageTab, navController)
++
++        verifyOrder {
++            addHomepageTab(true)
++            navController.navigate(NavGraphDirections.actionGlobalHome(focusOnAddressBar = true))
++        }
++    }
++
++    @Test
++    fun `GIVEN the patch of the feature is applied THEN the feature opens the new tabs of the tab strip`() {
++        assertTrue(NewTabFocusFeature in PatchFeatureHooks.all)
++    }
++}
