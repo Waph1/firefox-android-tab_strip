@@ -42,7 +42,7 @@ Oggi c'è una sola patch (`0001-fenix-chrome-like-adaptive-tab-strip.patch`). Le
 separate, così se un aggiornamento di Firefox ne rompe una si sistema solo quella e, nel frattempo, le altre
 continuano ad arrivare.
 
-- **Obbligatorie**: la `0001` attuale (tab strip, siti desktop/mobile, status bar, aggiornamenti dall'app) e una
+- **Obbligatorie**: la `0001` attuale (tab strip, siti desktop/mobile, aggiornamenti dall'app) e una
   nuova `0002` con l'infrastruttura comune descritta sotto. Se non si applicano o non compilano, la build fallisce
   come oggi e resta l'ultima Release buona.
 - **Facoltative**: tutte le altre. Se una non si applica o non compila, viene **saltata** e la Release esce lo

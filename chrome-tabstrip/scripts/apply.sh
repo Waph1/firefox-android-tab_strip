@@ -180,11 +180,22 @@ for patch in "${TARGET[@]}"; do
     fi
 
     info "Applicazione diretta fallita, provo con il merge a 3 vie..."
-    git apply --3way --whitespace=nowarn "$PATCHES_DIR/$patch" || true
+    THREE_WAY_STATUS=0
+    git apply --3way --whitespace=nowarn "$PATCHES_DIR/$patch" || THREE_WAY_STATUS=$?
     CONFLICTS="$(git diff --name-only --diff-filter=U)"
     # "git apply --3way" aggiunge le modifiche all'indice: le togliamo, così la patch resta solo nei file
     # (come con l'applicazione diretta) e unapply.sh / fetch-firefox.sh funzionano allo stesso modo.
     git reset -q -- "${PATCH_PATHS[@]}"
+    if [ "$THREE_WAY_STATUS" != 0 ] && [ -z "$CONFLICTS" ]; then
+        # Il merge a 3 vie non è nemmeno partito (ad es. manca la versione dei file da cui è stata generata la patch)
+        # e git non ha applicato nulla. La patch resta segnata come applicata, così refresh.sh rigenera proprio lei
+        # una volta applicata a mano.
+        APPLIED+=("$patch")
+        save_applied "$FIREFOX_DIR"
+        die "$patch non si applica e il merge a 3 vie non è possibile: non è stato applicato nulla." \
+            "Applicala a mano nella cartella di Firefox con: git apply --reject $PATCHES_DIR/$patch," \
+            "sistema le parti rifiutate (file .rej, poi cancellali) ed esegui $(dirname "$0")/refresh.sh $FIREFOX_DIR."
+    fi
     # La patch, applicata almeno in parte, è quella che refresh.sh rigenera.
     APPLIED+=("$patch")
     save_applied "$FIREFOX_DIR"
