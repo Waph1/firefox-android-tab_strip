@@ -1,0 +1,408 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/CrashReports.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/CrashReports.kt
+new file mode 100644
+index 00000000..521a35ff
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/CrashReports.kt
+@@ -0,0 +1,120 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import java.net.URLEncoder
++import java.util.Collections
++import java.util.IdentityHashMap
++import kotlin.math.max
++
++/** The page that opens a new issue in the repository of the patch, where the crash reports go. */
++internal const val NEW_CRASH_ISSUE_URL = "https://github.com/Waph1/firefox-android-tab_strip/issues/new"
++
++/** How long the address of a new issue can be: GitHub refuses longer ones. */
++internal const val MAX_CRASH_ISSUE_URL_LENGTH = 7500
++
++private const val MAX_TITLE_LENGTH = 100
++private const val MAX_FRAMES = 30
++private const val MAX_CAUSE_FRAMES = 12
++
++/**
++ * What a crash report says about a crash, besides its stack trace.
++ *
++ * @property kind What crashed, e.g. the code of the app or the Gecko engine.
++ * @property appVersion The version of Firefox, with its version code.
++ * @property features The optional features of the patch included in this build.
++ * @property missingFeatures The optional features of the patch missing from this build.
++ * @property device The device and its Android version.
++ * @property time When the crash happened, in UTC.
++ * @property breadcrumbs The last things the app did before the crash, oldest first.
++ */
++internal data class CrashReportDetails(
++    val kind: String,
++    val appVersion: String,
++    val features: List<String>,
++    val missingFeatures: List<String>,
++    val device: String,
++    val time: String,
++    val breadcrumbs: List<String>,
++)
++
++/** Returns the title of the issue of a crash, e.g. the exception and its message, shortened if needed. */
++internal fun crashIssueTitle(summary: String): String {
++    val title = "Crash: ${summary.lineSequence().firstOrNull().orEmpty().trim()}"
++    return if (title.length <= MAX_TITLE_LENGTH) title else title.take(MAX_TITLE_LENGTH - 1) + "…"
++}
++
++/**
++ * Returns the stack trace of [throwable] and of its causes, with the first frames of each: the root cause, often the
++ * most useful part, stays in.
++ */
++internal fun crashStackTrace(throwable: Throwable): String {
++    val seen = Collections.newSetFromMap(IdentityHashMap<Throwable, Boolean>())
++    return buildString {
++        var current: Throwable? = throwable
++        while (current != null && seen.add(current)) {
++            val isCause = current !== throwable
++            if (isCause) append("Caused by: ")
++            appendLine(current.toString())
++            val frames = current.stackTrace
++            val maxFrames = if (isCause) MAX_CAUSE_FRAMES else MAX_FRAMES
++            frames.take(maxFrames).forEach { appendLine("\tat $it") }
++            if (frames.size > maxFrames) appendLine("\t... ${frames.size - maxFrames} more")
++            current = current.cause
++        }
++    }.trimEnd()
++}
++
++/** Returns the text of the issue of a crash, before its stack trace. */
++internal fun crashIssueDetails(details: CrashReportDetails): String =
++    buildString {
++        appendLine("Segnalazione inviata da Firefox dopo un crash.")
++        appendLine()
++        appendLine("- **Tipo:** ${details.kind}")
++        appendLine("- **Versione:** ${details.appVersion}")
++        appendLine("- **Funzioni della patch:** ${details.features.joinToString().ifEmpty { "nessuna" }}")
++        if (details.missingFeatures.isNotEmpty()) {
++            appendLine("- **Funzioni mancanti:** ${details.missingFeatures.joinToString()}")
++        }
++        appendLine("- **Dispositivo:** ${details.device}")
++        append("- **Data:** ${details.time} UTC")
++        if (details.breadcrumbs.isNotEmpty()) {
++            appendLine()
++            appendLine()
++            appendLine("Ultime azioni dell'app:")
++            details.breadcrumbs.forEach { appendLine("- $it") }
++        }
++    }.trimEnd()
++
++/**
++ * Returns the address of a new issue of the repository filled in with a crash: its title, its [details] and its
++ * [stackTrace]. The stack trace loses its last lines when the address would be too long for GitHub.
++ *
++ * @param title The title of the issue.
++ * @param details The text before the stack trace, see [crashIssueDetails].
++ * @param stackTrace The stack trace, see [crashStackTrace].
++ * @param newIssueUrl The page that opens a new issue.
++ * @param maxLength How long the address can be.
++ */
++internal fun crashIssueUrl(
++    title: String,
++    details: String,
++    stackTrace: String,
++    newIssueUrl: String = NEW_CRASH_ISSUE_URL,
++    maxLength: Int = MAX_CRASH_ISSUE_URL_LENGTH,
++): String {
++    var lines = stackTrace.lines()
++    var isShortened = false
++    while (true) {
++        val trace = lines.joinToString("\n") + if (isShortened) "\n\t…" else ""
++        val body = "$details\n\n```\n$trace\n```"
++        val url = "$newIssueUrl?labels=crash&title=${title.encoded()}&body=${body.encoded()}"
++        if (url.length <= maxLength || lines.isEmpty()) return url
++        lines = lines.dropLast(max(1, lines.size / 10))
++        isShortened = true
++    }
++}
++
++private fun String.encoded(): String = URLEncoder.encode(this, "UTF-8")
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/CrashReportsFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/CrashReportsFeature.kt
+new file mode 100644
+index 00000000..da04d29a
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/CrashReportsFeature.kt
+@@ -0,0 +1,158 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import android.Manifest
++import android.app.PendingIntent
++import android.content.Context
++import android.content.Intent
++import android.content.pm.PackageManager
++import android.net.Uri
++import android.os.Build
++import androidx.core.app.NotificationChannelCompat
++import androidx.core.app.NotificationCompat
++import androidx.core.app.NotificationManagerCompat
++import androidx.core.content.ContextCompat
++import androidx.core.content.pm.PackageInfoCompat
++import mozilla.components.concept.base.crash.Breadcrumb
++import mozilla.components.lib.crash.Crash
++import mozilla.components.lib.crash.service.CrashReporterService
++import mozilla.components.support.base.log.logger.Logger
++import mozilla.components.support.utils.ext.packageManagerCompatHelper
++import org.mozilla.fenix.R
++import java.text.SimpleDateFormat
++import java.util.Date
++import java.util.Locale
++import java.util.TimeZone
++
++private const val NOTIFICATION_CHANNEL_ID = "chrome_tabstrip_crash_reports"
++private const val MAX_BREADCRUMBS = 10
++
++/**
++ * Optional feature "crash reports on GitHub" (`0090-crash-reports.patch`): the crash reports go to the repository of
++ * the patch, so that its crashes can be fixed, instead of Mozilla (which doesn't fix the crashes of a modified
++ * Firefox, and doesn't show them to anyone else).
++ *
++ * When the user sends the report of a crash (from the crash prompt of Firefox), a notification opens a new issue of
++ * the repository filled in with the crash, which the user checks and submits on GitHub: the app holds no GitHub key,
++ * and nothing is sent without the user. The same issue opens from the list of the crashes (about:crashes).
++ */
++object CrashReportsFeature : PatchFeatureHooks {
++    override fun crashReporting(
++        context: Context,
++        default: CrashReporting,
++    ): CrashReporting = CrashReporting(listOf(GitHubCrashReporterService(context)), organizationName = "GitHub")
++}
++
++/**
++ * Turns the crash reports into new issues of the repository of the patch (see [CrashReportsFeature]): the report of a
++ * crash is the address of its issue, which a notification opens.
++ */
++private class GitHubCrashReporterService(
++    private val context: Context,
++) : CrashReporterService {
++    private val logger = Logger("GitHubCrashReporterService")
++
++    override val id: String = "github-chrome-tabstrip"
++
++    override val name: String = "GitHub"
++
++    override fun createCrashReportUrl(identifier: String): String? =
++        identifier.takeIf { it.startsWith(NEW_CRASH_ISSUE_URL) }
++
++    override fun report(crash: Crash.UncaughtExceptionCrash): String {
++        val throwable = crash.throwable
++        val details = details(crash, kind = "eccezione nel codice Android di Firefox (dove stanno le patch)")
++        val url =
++            crashIssueUrl(crashIssueTitle(throwable.toString()), crashIssueDetails(details), crashStackTrace(throwable))
++        notify(url)
++        return url
++    }
++
++    override fun report(crash: Crash.NativeCodeCrash): String {
++        val process = listOfNotNull(crash.processType, crash.remoteType).joinToString(", ").ifEmpty { "principale" }
++        val details = details(crash, kind = "crash nel motore Gecko (codice nativo, processo $process)")
++        val stackTrace = "Nessuno stack Java: il minidump del crash nativo resta sul telefono."
++        val title = crashIssueTitle("crash nativo di Gecko ($process)")
++        val url = crashIssueUrl(title, crashIssueDetails(details), stackTrace)
++        notify(url)
++        return url
++    }
++
++    // The exceptions that Firefox catches aren't crashes: they aren't reported.
++    override fun report(
++        throwable: Throwable,
++        breadcrumbs: ArrayList<Breadcrumb>,
++    ): String? = null
++
++    private fun details(
++        crash: Crash,
++        kind: String,
++    ): CrashReportDetails {
++        val features = PatchFeatures.current
++        val packageInfo = context.packageManagerCompatHelper.getPackageInfoCompat(context.packageName, 0)
++        val time =
++            SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ROOT)
++                .apply { timeZone = TimeZone.getTimeZone("UTC") }
++                .format(Date(crash.timestamp))
++        return CrashReportDetails(
++            kind = kind,
++            appVersion = "${packageInfo.versionName} (${PackageInfoCompat.getLongVersionCode(packageInfo)})",
++            features = features.included.map { it.id },
++            missingFeatures = features.missing.map { it.id },
++            device =
++                "${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
++            time = time,
++            breadcrumbs =
++                crash.breadcrumbs.takeLast(MAX_BREADCRUMBS).map { breadcrumb ->
++                    listOf(breadcrumb.category, breadcrumb.message).filter { it.isNotBlank() }.joinToString(": ")
++                },
++        )
++    }
++
++    /** Shows a notification that opens the issue of the crash in Firefox. */
++    private fun notify(url: String) {
++        val notifications = NotificationManagerCompat.from(context)
++        val canNotify =
++            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
++                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
++                PackageManager.PERMISSION_GRANTED
++        if (!canNotify || !notifications.areNotificationsEnabled()) {
++            logger.info("The crash report can't be notified: it opens from about:crashes")
++            return
++        }
++
++        notifications.createNotificationChannel(
++            NotificationChannelCompat.Builder(NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_DEFAULT)
++                .setName(context.getString(R.string.crash_reports_notification_channel))
++                .build(),
++        )
++        val intent =
++            Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
++                setPackage(context.packageName)
++                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
++            }
++        val pendingIntent =
++            PendingIntent.getActivity(
++                context,
++                url.hashCode(),
++                intent,
++                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
++            )
++        val notification =
++            NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
++                .setSmallIcon(R.drawable.ic_status_logo)
++                .setContentTitle(context.getString(R.string.crash_reports_notification_title))
++                .setContentText(context.getString(R.string.crash_reports_notification_text))
++                .setContentIntent(pendingIntent)
++                .setAutoCancel(true)
++                .build()
++        try {
++            notifications.notify(url.hashCode(), notification)
++        } catch (e: SecurityException) {
++            logger.warn("Can't notify the crash report", e)
++        }
++    }
++}
+diff --git a/mobile/android/fenix/app/src/main/res/values-it/crash_reports_strings.xml b/mobile/android/fenix/app/src/main/res/values-it/crash_reports_strings.xml
+new file mode 100644
+index 00000000..e8af313a
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/res/values-it/crash_reports_strings.xml
+@@ -0,0 +1,9 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++<resources>
++    <string name="crash_reports_notification_channel">Segnalazioni di crash</string>
++    <string name="crash_reports_notification_title">Segnalazione del crash pronta</string>
++    <string name="crash_reports_notification_text">Tocca per controllarla e inviarla su GitHub</string>
++</resources>
+diff --git a/mobile/android/fenix/app/src/main/res/values/crash_reports_strings.xml b/mobile/android/fenix/app/src/main/res/values/crash_reports_strings.xml
+new file mode 100644
+index 00000000..8c3f31e0
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/res/values/crash_reports_strings.xml
+@@ -0,0 +1,13 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++<!-- Crash reports on GitHub of the patch with the Chrome-like tab strip. Only translated in Italian. -->
++<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
++    <!-- Name of the notification channel of the crash reports, in the notification settings of Android. -->
++    <string name="crash_reports_notification_channel">Crash reports</string>
++    <!-- Title of the notification shown when a crash report is ready to be sent on GitHub. -->
++    <string name="crash_reports_notification_title">Crash report ready</string>
++    <!-- Text of the notification shown when a crash report is ready to be sent on GitHub. -->
++    <string name="crash_reports_notification_text">Tap to check it and send it on GitHub</string>
++</resources>
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/CrashReportsTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/CrashReportsTest.kt
+new file mode 100644
+index 00000000..7ee68612
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/CrashReportsTest.kt
+@@ -0,0 +1,78 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import java.net.URLDecoder
++
++class CrashReportsTest {
++    private val details =
++        CrashReportDetails(
++            kind = "eccezione",
++            appVersion = "158.0.2 (2016191874)",
++            features = listOf("bookmarks-bar", "tab-groups"),
++            missingFeatures = listOf("page-zoom"),
++            device = "samsung SM-F966B, Android 16 (API 36)",
++            time = "2026-10-22 22:00",
++            breadcrumbs = listOf("onConfigurationChanged()"),
++        )
++
++    @Test
++    fun `WHEN titling a crash THEN it is its first line, shortened if needed`() {
++        assertEquals(
++            "Crash: java.lang.IllegalStateException: boom",
++            crashIssueTitle("java.lang.IllegalStateException: boom\nmore"),
++        )
++        val title = crashIssueTitle("x".repeat(200))
++        assertEquals(100, title.length)
++        assertTrue(title.endsWith("…"))
++    }
++
++    @Test
++    fun `WHEN writing the stack trace THEN it has the exception and its causes`() {
++        val cause = IllegalArgumentException("root")
++        val trace = crashStackTrace(IllegalStateException("top", cause))
++
++        assertTrue(trace.startsWith("java.lang.IllegalStateException: top\n\tat "))
++        assertTrue(trace.contains("Caused by: java.lang.IllegalArgumentException: root"))
++    }
++
++    @Test
++    fun `WHEN writing the details THEN they list the version, the features and the device`() {
++        val text = crashIssueDetails(details)
++
++        assertTrue(text.contains("158.0.2 (2016191874)"))
++        assertTrue(text.contains("bookmarks-bar, tab-groups"))
++        assertTrue(text.contains("**Funzioni mancanti:** page-zoom"))
++        assertTrue(text.contains("samsung SM-F966B"))
++        assertTrue(text.contains("- onConfigurationChanged()"))
++        assertFalse(crashIssueDetails(details.copy(missingFeatures = emptyList())).contains("mancanti"))
++    }
++
++    @Test
++    fun `WHEN building the address of the issue THEN it fills in the title and the body with the stack trace`() {
++        val url = crashIssueUrl("Crash: boom", "details", "line 1\nline 2")
++
++        assertTrue(url.startsWith("$NEW_CRASH_ISSUE_URL?labels=crash&title="))
++        val body = URLDecoder.decode(url.substringAfter("&body="), "UTF-8")
++        assertEquals("details\n\n```\nline 1\nline 2\n```", body)
++        assertEquals("Crash: boom", URLDecoder.decode(url.substringAfter("title=").substringBefore("&body="), "UTF-8"))
++    }
++
++    @Test
++    fun `GIVEN a long stack trace WHEN building the address of the issue THEN the end of the stack trace is cut`() {
++        val trace = (1..2000).joinToString("\n") { "\tat org.example.Class.method$it(Class.kt:$it)" }
++        val url = crashIssueUrl("Crash: boom", "details", trace)
++
++        assertTrue(url.length <= MAX_CRASH_ISSUE_URL_LENGTH)
++        val body = URLDecoder.decode(url.substringAfter("&body="), "UTF-8")
++        assertTrue(body.contains("method1("))
++        assertFalse(body.contains("method2000("))
++        assertTrue(body.endsWith("\t…\n```"))
++    }
++}

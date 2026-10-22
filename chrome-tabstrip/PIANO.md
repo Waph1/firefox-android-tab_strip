@@ -24,6 +24,7 @@ schermo grande" compare e sparisce **al volo** aprendo e chiudendo il telefono, 
 | 6  | Mouse e trackpad                                  | `0060-mouse`                 | facoltativa | fatto        |
 | 7  | Icona audio sulle schede                          | `0070-tab-audio`             | facoltativa | fatto        |
 | 8  | Gruppi di schede nella tab strip                  | `0080-tab-groups`            | facoltativa | fatto        |
+| 9  | Segnalazioni dei crash su GitHub                  | `0090-crash-reports`         | facoltativa | fatto        |
 
 L'ordine della tabella è l'ordine di lavoro: prima l'infrastruttura, poi dal più semplice e utile al più complesso e
 fragile. I nomi dei file sono indicativi.

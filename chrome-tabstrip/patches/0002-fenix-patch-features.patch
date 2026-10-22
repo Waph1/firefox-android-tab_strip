@@ -735,6 +735,43 @@ index 00000000..06b0b527
 +        onDismissRequest = onDismissRequest,
 +    )
 +}
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Analytics.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Analytics.kt
+index 6774a4eb..137e691a 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Analytics.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Analytics.kt
+@@ -43,6 +43,8 @@ import org.mozilla.fenix.crashes.NimbusExperimentDataProvider
+ import org.mozilla.fenix.crashes.ReleaseRuntimeTagProvider
+ import org.mozilla.fenix.crashes.crashReportOption
+ import org.mozilla.fenix.ext.getCustomGleanServerUrlIfAvailable
++import org.mozilla.fenix.patchfeatures.CrashReporting
++import org.mozilla.fenix.patchfeatures.PatchFeatureHooks
+ import org.mozilla.fenix.perf.lazyMonitored
+ import org.mozilla.fenix.utils.Settings
+ import org.mozilla.geckoview.BuildConfig.MOZ_APP_BUILDID
+@@ -127,9 +129,13 @@ class Analytics(
+                 null
+             }
+ 
++        // The optional features of the patch may send the crash reports elsewhere.
++        val crashReporting =
++            PatchFeatureHooks.crashReporting(context, CrashReporting(services, organizationName = "Mozilla"))
++
+         CrashReporter(
+             context = context,
+-            services = services,
++            services = crashReporting.services,
+             telemetryServices =
+                 listOf(
+                     GleanCrashReporterService(
+@@ -145,7 +151,7 @@ class Analytics(
+             promptConfiguration =
+                 CrashReporter.PromptConfiguration(
+                     appName = context.getString(R.string.app_name),
+-                    organizationName = "Mozilla",
++                    organizationName = crashReporting.organizationName,
+                 ),
+             enabled = true,
+             nonFatalCrashIntent = pendingIntent,
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/menu/MenuDialogFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/menu/MenuDialogFragment.kt
 index 2d14245b..8678bc46 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/menu/MenuDialogFragment.kt
@@ -943,10 +980,10 @@ index c1741b4e..add1f644 100644
          }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
 new file mode 100644
-index 00000000..a9e8f916
+index 00000000..de520fa6
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
-@@ -0,0 +1,441 @@
+@@ -0,0 +1,471 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -969,6 +1006,7 @@ index 00000000..a9e8f916
 +import kotlinx.coroutines.flow.SharedFlow
 +import kotlinx.coroutines.flow.asSharedFlow
 +import mozilla.components.compose.base.menu.MenuItem
++import mozilla.components.lib.crash.service.CrashReporterService
 +import org.json.JSONArray
 +import org.json.JSONException
 +import org.json.JSONObject
@@ -1118,6 +1156,17 @@ index 00000000..a9e8f916
 +    val onShowMenu: () -> Unit,
 +)
 +
++/**
++ * Where the crash reports go, see [PatchFeatureHooks.crashReporting].
++ *
++ * @property services The services that receive the crash reports.
++ * @property organizationName Who receives them, in the crash prompt ("Send crash report to …").
++ */
++data class CrashReporting(
++    val services: List<CrashReporterService>,
++    val organizationName: String,
++)
++
 +/** What the tab strip shows, in order: its tabs and the items of an optional feature, see [PatchFeatureHooks]. */
 +sealed interface TabStripEntry {
 +    /**
@@ -1259,6 +1308,18 @@ index 00000000..a9e8f916
 +    fun addCustomizationPreferences(fragment: PreferenceFragmentCompat) = Unit
 +
 +    /**
++     * Returns where the crash reports go in place of [default] (the services of Firefox, which send them to Mozilla),
++     * or `null` to keep it. Only the first feature that changes it is used. It may be called in any process of the app.
++     *
++     * @param context The application context.
++     * @param default Where Firefox sends the crash reports.
++     */
++    fun crashReporting(
++        context: Context,
++        default: CrashReporting,
++    ): CrashReporting? = null
++
++    /**
 +     * A row the feature adds next to the address bar of the pages and of the homepage (not in custom tabs): under it
 +     * when the address bar is at the top, above it when it's at the bottom. It scrolls away with the address bar.
 +     *
@@ -1364,6 +1425,12 @@ index 00000000..a9e8f916
 +            all.fold<PatchFeatureHooks, Modifier>(Modifier) { modifier, hooks ->
 +                modifier.then(hooks.tabStripModifier(listState))
 +            }
++
++        /** Where the crash reports go, see [PatchFeatureHooks.crashReporting]. */
++        fun crashReporting(
++            context: Context,
++            default: CrashReporting,
++        ): CrashReporting = all.firstNotNullOfOrNull { it.crashReporting(context, default) } ?: default
 +
 +        /** The rows of the optional features next to the address bar, see [PatchFeatureHooks.AddressBarRow]. */
 +        @Composable
