@@ -1,0 +1,690 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabGroups.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabGroups.kt
+new file mode 100644
+index 00000000..9209bbd5
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabGroups.kt
+@@ -0,0 +1,144 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import mozilla.components.feature.tabgroups.storage.data.TabGroup
++import mozilla.components.feature.tabgroups.storage.data.TabGroupData
++
++/** The most characters of a group title that the width of its label counts, see [tabGroupLabelWidthDp]. */
++private const val LABEL_MAX_COUNTED_CHARACTERS = 16
++
++/** What the tab strip shows with the tab groups, see [groupedTabStrip]. */
++internal sealed interface GroupedTabStripEntry {
++    /**
++     * A tab.
++     *
++     * @property id The id of the tab.
++     */
++    data class Tab(
++        val id: String,
++    ) : GroupedTabStripEntry
++
++    /**
++     * The label of a tab group, before its tabs.
++     *
++     * @property group The group.
++     * @property isCollapsed Whether the group is collapsed: its tabs are hidden.
++     * @property tabCount How many tabs the group has.
++     */
++    data class Label(
++        val group: TabGroup,
++        val isCollapsed: Boolean,
++        val tabCount: Int,
++    ) : GroupedTabStripEntry
++}
++
++/**
++ * Arranges the tab strip with the tab groups, like Chrome: each group shows its label in place of its first tab,
++ * followed by all its tabs unless it's collapsed. The groups closed in the tabs tray of Firefox don't show their tabs.
++ * The selected tab is always shown.
++ *
++ * @param tabIds The tabs of the tab strip, in order.
++ * @param data The tab groups and the group of each tab.
++ * @param collapsedGroupIds The groups collapsed in the tab strip.
++ * @param selectedTabId The selected tab.
++ */
++internal fun groupedTabStrip(
++    tabIds: List<String>,
++    data: TabGroupData,
++    collapsedGroupIds: Set<String>,
++    selectedTabId: String?,
++): List<GroupedTabStripEntry> {
++    val groupsById = data.tabGroups.associateBy { it.id }
++    val tabsByGroupId = tabIds.groupBy { data.tabGroupAssignments[it] }
++    val shownGroupIds = mutableSetOf<String>()
++    val entries = mutableListOf<GroupedTabStripEntry>()
++    for (tabId in tabIds) {
++        val group = data.tabGroupAssignments[tabId]?.let { groupsById[it] }
++        when {
++            group == null -> entries.add(GroupedTabStripEntry.Tab(tabId))
++            group.closed -> if (tabId == selectedTabId) entries.add(GroupedTabStripEntry.Tab(tabId))
++            group.id !in shownGroupIds -> {
++                shownGroupIds.add(group.id)
++                val groupTabIds = tabsByGroupId[group.id].orEmpty()
++                val isCollapsed = group.id in collapsedGroupIds
++                entries.add(GroupedTabStripEntry.Label(group, isCollapsed, groupTabIds.size))
++                groupTabIds
++                    .filter { !isCollapsed || it == selectedTabId }
++                    .forEach { entries.add(GroupedTabStripEntry.Tab(it)) }
++            }
++        }
++    }
++    return entries
++}
++
++/**
++ * Whether the tab with [tabId] is hidden in the tab strip by its group (see [groupedTabStrip]): it's in a collapsed
++ * group, or in a group closed in the tabs tray, and it isn't the selected tab.
++ */
++internal fun isTabHiddenByGroup(
++    tabId: String,
++    data: TabGroupData,
++    collapsedGroupIds: Set<String>,
++    selectedTabId: String?,
++): Boolean {
++    if (tabId == selectedTabId) return false
++    val groupId = data.tabGroupAssignments[tabId] ?: return false
++    val group = data.tabGroups.firstOrNull { it.id == groupId } ?: return false
++    return group.closed || group.id in collapsedGroupIds
++}
++
++/**
++ * Returns the first move that brings the tabs of an open group together, so that they stay together like in Chrome:
++ * the other tabs of the group go after its first tab, in their order. Returns the tabs to move and the tab to put them
++ * after, or `null` if the tabs of every group are already together.
++ *
++ * @param tabIds The tabs, in order.
++ * @param data The tab groups and the group of each tab.
++ */
++internal fun tabGroupMove(
++    tabIds: List<String>,
++    data: TabGroupData,
++): Pair<List<String>, String>? {
++    for (group in data.tabGroups) {
++        if (group.closed) continue
++        val indices = tabIds.indices.filter { data.tabGroupAssignments[tabIds[it]] == group.id }
++        if (indices.size > 1 && indices.last() - indices.first() != indices.lastIndex) {
++            val groupTabIds = indices.map { tabIds[it] }
++            return groupTabIds.drop(1) to groupTabIds.first()
++        }
++    }
++    return null
++}
++
++/**
++ * Returns the tab to select in place of [selectedTabId] when its group is collapsed or closed: the nearest tab after
++ * it that [isLeft] doesn't exclude, otherwise the nearest one before it; `null` if there is none.
++ *
++ * @param tabIds The tabs, in order.
++ * @param selectedTabId The selected tab.
++ * @param isLeft Whether a tab can't be selected (e.g. it's in the group, or hidden).
++ */
++internal fun nearestTabOutside(
++    tabIds: List<String>,
++    selectedTabId: String,
++    isLeft: (String) -> Boolean,
++): String? {
++    val index = tabIds.indexOf(selectedTabId)
++    return tabIds.drop(index + 1).firstOrNull { !isLeft(it) }
++        ?: tabIds.take(index.coerceAtLeast(0)).lastOrNull { !isLeft(it) }
++}
++
++/**
++ * About how wide the label of a group is in the tab strip, in dp: a dot for a group without title, otherwise its title
++ * (the number of tabs is added when the group is collapsed).
++ */
++internal fun tabGroupLabelWidthDp(
++    title: String,
++    isCollapsed: Boolean,
++): Int {
++    val dotOrTitle = if (title.isBlank()) 12 else 16 + 7 * title.length.coerceAtMost(LABEL_MAX_COUNTED_CHARACTERS)
++    return dotOrTitle + (if (isCollapsed) 16 else 0) + 8
++}
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabGroupsFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabGroupsFeature.kt
+new file mode 100644
+index 00000000..56633188
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabGroupsFeature.kt
+@@ -0,0 +1,376 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import android.content.Context
++import android.content.SharedPreferences
++import androidx.compose.foundation.background
++import androidx.compose.foundation.combinedClickable
++import androidx.compose.foundation.gestures.awaitEachGesture
++import androidx.compose.foundation.gestures.waitForUpOrCancellation
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.fillMaxHeight
++import androidx.compose.foundation.layout.height
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.size
++import androidx.compose.foundation.layout.width
++import androidx.compose.foundation.layout.widthIn
++import androidx.compose.foundation.shape.CircleShape
++import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.material3.Text
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.collectAsState
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.rememberUpdatedState
++import androidx.compose.runtime.setValue
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.draw.clip
++import androidx.compose.ui.draw.drawWithContent
++import androidx.compose.ui.geometry.Offset
++import androidx.compose.ui.geometry.Size
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.input.pointer.PointerEventPass
++import androidx.compose.ui.input.pointer.PointerEventType
++import androidx.compose.ui.input.pointer.PointerInputScope
++import androidx.compose.ui.input.pointer.isSecondaryPressed
++import androidx.compose.ui.input.pointer.pointerInput
++import androidx.compose.ui.platform.LocalContext
++import androidx.compose.ui.res.stringResource
++import androidx.compose.ui.semantics.contentDescription
++import androidx.compose.ui.semantics.semantics
++import androidx.compose.ui.semantics.stateDescription
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.text.style.TextOverflow
++import androidx.compose.ui.unit.dp
++import androidx.core.content.edit
++import androidx.navigation.findNavController
++import kotlinx.coroutines.MainScope
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.combine
++import kotlinx.coroutines.flow.distinctUntilChanged
++import kotlinx.coroutines.flow.map
++import kotlinx.coroutines.launch
++import mozilla.components.browser.state.selector.getNormalOrPrivateTabs
++import mozilla.components.browser.state.selector.normalTabs
++import mozilla.components.browser.state.selector.selectedTab
++import mozilla.components.compose.base.menu.DropdownMenu
++import mozilla.components.compose.base.menu.MenuItem
++import mozilla.components.compose.base.text.Text
++import mozilla.components.feature.tabgroups.storage.data.TabGroup
++import mozilla.components.feature.tabgroups.storage.data.TabGroupData
++import org.mozilla.fenix.HomeActivity
++import org.mozilla.fenix.R
++import org.mozilla.fenix.components.Components
++import org.mozilla.fenix.ext.components
++import org.mozilla.fenix.tabgroups.flow.TabGroupFlowEntryPoint
++import org.mozilla.fenix.tabgroups.flow.TabGroupFlowFragmentArgs
++import org.mozilla.fenix.tabstray.data.TabGroupTheme
++import org.mozilla.fenix.theme.FirefoxTheme
++import java.lang.ref.WeakReference
++
++private const val PREFERENCES_NAME = "chrome_tabstrip_tab_groups"
++private const val PREF_COLLAPSED = "collapsed"
++
++private val LabelHeight = 24.dp
++private val LabelMaxWidth = 160.dp
++private val DotSize = 12.dp
++private val GroupLineHeight = 2.dp
++
++/**
++ * Optional feature "tab groups in the tab strip" (`0080-tab-groups.patch`): the tab groups of Firefox (the ones of the
++ * tabs tray) show in the tab strip like in Chrome. Each group has a label with its color and title before its tabs,
++ * which are underlined with the color of the group and kept together; tapping the label collapses or expands the
++ * group, and its menu (long press or right click) edits, ungroups or closes it. The menu of a tab adds it to a group,
++ * or removes it from its group.
++ *
++ * Tab groups are turned on (unless the user turned them off in Settings → Tabs). The collapsed groups are remembered;
++ * a collapsed group expands when one of its tabs is selected, e.g. from the tabs tray.
++ */
++object TabGroupsFeature : PatchFeatureHooks {
++    private val scope = MainScope()
++    private val groupData = MutableStateFlow(TabGroupData())
++    private val collapsedGroupIds = MutableStateFlow(emptySet<String>())
++    private var preferences: SharedPreferences? = null
++    private var components: Components? = null
++    private var activity = WeakReference<HomeActivity>(null)
++
++    override fun onActivityCreated(activity: HomeActivity) {
++        this.activity = WeakReference(activity)
++        if (preferences != null) return
++        val components = activity.components
++        this.components = components
++        val preferences = activity.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
++        this.preferences = preferences
++        collapsedGroupIds.value = preferences.getStringSet(PREF_COLLAPSED, null).orEmpty().toSet()
++
++        // Like Chrome, tab groups are on, unless the user turned them off.
++        val settings = components.settings
++        if (!settings.preferences.contains(activity.getString(R.string.pref_key_tab_groups))) {
++            settings.tabGroupsEnabled = true
++        }
++
++        scope.launch {
++            components.core.tabGroupRepository.tabGroupDataFlow.collect { data ->
++                groupData.value = data
++                // The deleted groups are forgotten.
++                val groupIds = data.tabGroups.mapTo(HashSet()) { it.id }
++                collapsedGroupIds.value.filterTo(HashSet()) { it in groupIds }.let { saveCollapsed(it) }
++            }
++        }
++
++        val store = components.core.store
++        // The tabs of a group stay together, so that the tab strip and the keyboard shortcuts follow the same order.
++        scope.launch {
++            val tabIds = store.stateFlow.map { state -> state.normalTabs.map { it.id } }.distinctUntilChanged()
++            combine(tabIds, groupData) { ids, data -> if (settings.tabGroupsEnabled) tabGroupMove(ids, data) else null }
++                .distinctUntilChanged()
++                .collect { move ->
++                    move?.let { (tabIds, targetTabId) ->
++                        components.useCases.tabsUseCases.moveTabs(tabIds, targetTabId, placeAfter = true)
++                    }
++                }
++        }
++        // Like Chrome, a collapsed group expands when one of its tabs is selected.
++        scope.launch {
++            combine(store.stateFlow.map { it.selectedTabId }.distinctUntilChanged(), groupData) { tabId, data ->
++                tabId?.let { data.tabGroupAssignments[it] }
++            }.distinctUntilChanged()
++                .collect { groupId -> if (groupId != null) saveCollapsed(collapsedGroupIds.value - groupId) }
++        }
++    }
++
++    @Composable
++    override fun tabStripEntries(tabs: List<TabStripTabInfo>): List<TabStripEntry>? {
++        val context = LocalContext.current
++        val data by groupData.collectAsState()
++        val collapsed by collapsedGroupIds.collectAsState()
++        if (!context.components.settings.tabGroupsEnabled || data.tabGroups.isEmpty()) return null
++
++        val selectedTabId = tabs.firstOrNull { it.isSelected }?.id
++        return groupedTabStrip(tabs.map { it.id }, data, collapsed, selectedTabId).map { entry ->
++            when (entry) {
++                is GroupedTabStripEntry.Tab -> TabStripEntry.Tab(entry.id)
++                is GroupedTabStripEntry.Label ->
++                    TabStripEntry.Item(
++                        key = "tab-group:${entry.group.id}",
++                        width = tabGroupLabelWidthDp(entry.group.title, entry.isCollapsed).dp,
++                    ) {
++                        TabGroupLabel(entry)
++                    }
++            }
++        }
++    }
++
++    override fun isTabHidden(tabId: String): Boolean {
++        val components = components ?: return false
++        return components.settings.tabGroupsEnabled &&
++            isTabHiddenByGroup(
++                tabId,
++                groupData.value,
++                collapsedGroupIds.value,
++                components.core.store.state.selectedTabId,
++            )
++    }
++
++    @Composable
++    override fun TabStripTab(
++        tab: TabStripTabInfo,
++        actions: TabStripTabActions,
++        content: @Composable () -> Unit,
++    ) {
++        val data by groupData.collectAsState()
++        val group = if (tab.isPrivate) null else data.groupOf(tab.id)
++        val color = group?.theme?.toTabGroupTheme()?.primary ?: Color.Unspecified
++        val isShown = group != null && LocalContext.current.components.settings.tabGroupsEnabled
++        // The tabs of a group are underlined with its color.
++        Box(
++            modifier =
++                Modifier.drawWithContent {
++                    drawContent()
++                    if (isShown) {
++                        val height = GroupLineHeight.toPx()
++                        drawRect(color, topLeft = Offset(0f, size.height - height), size = Size(size.width, height))
++                    }
++                },
++            propagateMinConstraints = true,
++        ) {
++            content()
++        }
++    }
++
++    override fun tabStripMenuItems(tab: TabStripMenuTab): List<MenuItem> {
++        val components = components ?: return emptyList()
++        if (tab.isPrivate || !components.settings.tabGroupsEnabled) return emptyList()
++        val isInGroup = groupData.value.tabGroupAssignments[tab.id] != null
++        return listOfNotNull(
++            MenuItem.TextItem(text = Text.Resource(R.string.tabstrip_groups_add_tab)) {
++                openTabGroupFlow(TabGroupFlowEntryPoint.AddTabToGroup(tab.id))
++            },
++            if (isInGroup) {
++                MenuItem.TextItem(text = Text.Resource(R.string.tabstrip_groups_remove_tab)) {
++                    scope.launch { components.core.tabGroupRepository.deleteTabGroupAssignmentById(tab.id) }
++                }
++            } else {
++                null
++            },
++        )
++    }
++
++    /** Collapses or expands [group]; it doesn't collapse if no tab outside it can be selected in place of its own. */
++    private fun toggleCollapsed(group: TabGroup) {
++        val collapsed = collapsedGroupIds.value
++        if (group.id in collapsed) {
++            saveCollapsed(collapsed - group.id)
++        } else if (leaveGroup(group.id)) {
++            saveCollapsed(collapsed + group.id)
++        }
++    }
++
++    /** Closes [group] like the tabs tray does: it disappears from the tab strip, and reopens from the tabs tray. */
++    private fun closeGroup(group: TabGroup) {
++        val components = components ?: return
++        if (leaveGroup(group.id)) {
++            scope.launch { components.core.tabGroupRepository.closeTabGroup(group.id) }
++        }
++    }
++
++    /**
++     * If the selected tab is in the group with [groupId], selects the nearest shown tab outside it. Returns `false` if
++     * there is none.
++     */
++    private fun leaveGroup(groupId: String): Boolean {
++        val components = components ?: return false
++        val state = components.core.store.state
++        val selectedTab = state.selectedTab ?: return true
++        val data = groupData.value
++        if (data.tabGroupAssignments[selectedTab.id] != groupId) return true
++        val tabIds = state.getNormalOrPrivateTabs(selectedTab.content.private).map { it.id }
++        val tabId =
++            nearestTabOutside(tabIds, selectedTab.id) {
++                data.tabGroupAssignments[it] == groupId ||
++                    isTabHiddenByGroup(it, data, collapsedGroupIds.value, selectedTabId = null)
++            } ?: return false
++        components.useCases.tabsUseCases.selectTab(tabId)
++        return true
++    }
++
++    private fun ungroup(group: TabGroup) {
++        val components = components ?: return
++        scope.launch { components.core.tabGroupRepository.ungroupTabGroup(group.id) }
++    }
++
++    private fun openTabGroupFlow(entryPoint: TabGroupFlowEntryPoint) {
++        activity
++            .get()
++            ?.findNavController(R.id.container)
++            ?.navigate(R.id.tabGroupFlowFragment, TabGroupFlowFragmentArgs(entryPoint).toBundle())
++    }
++
++    private fun saveCollapsed(groupIds: Set<String>) {
++        if (groupIds == collapsedGroupIds.value) return
++        collapsedGroupIds.value = groupIds
++        preferences?.edit { putStringSet(PREF_COLLAPSED, groupIds) }
++    }
++
++    /** The label of a tab group in the tab strip, which collapses or expands the group and has its menu. */
++    @Composable
++    private fun TabGroupLabel(label: GroupedTabStripEntry.Label) {
++        val group = label.group
++        val theme = group.theme.toTabGroupTheme()
++        var isMenuShown by remember { mutableStateOf(false) }
++        val currentGroup by rememberUpdatedState(group)
++        val unnamed = stringResource(R.string.tabstrip_groups_unnamed)
++        val description = stringResource(R.string.tabstrip_groups_label_description, group.title.ifBlank { unnamed })
++        val state =
++            stringResource(
++                if (label.isCollapsed) R.string.tabstrip_groups_collapsed else R.string.tabstrip_groups_expanded,
++            )
++
++        Box(modifier = Modifier.fillMaxHeight().padding(horizontal = 4.dp), contentAlignment = Alignment.Center) {
++            Row(
++                modifier =
++                    Modifier.height(LabelHeight)
++                        .widthIn(max = LabelMaxWidth)
++                        .clip(RoundedCornerShape(8.dp))
++                        .pointerInput(Unit) { detectRightClicks { isMenuShown = true } }
++                        .combinedClickable(
++                            onClick = { toggleCollapsed(currentGroup) },
++                            onLongClick = { isMenuShown = true },
++                        )
++                        .then(
++                            if (group.title.isBlank()) Modifier else Modifier.background(theme.primary),
++                        )
++                        .semantics {
++                            contentDescription = description
++                            stateDescription = state
++                        }
++                        .padding(horizontal = if (group.title.isBlank()) 4.dp else 8.dp),
++                verticalAlignment = Alignment.CenterVertically,
++            ) {
++                if (group.title.isBlank()) {
++                    Box(modifier = Modifier.size(DotSize).clip(CircleShape).background(theme.primary))
++                } else {
++                    Text(
++                        text = group.title,
++                        color = theme.onPrimary,
++                        maxLines = 1,
++                        overflow = TextOverflow.Ellipsis,
++                        style = FirefoxTheme.typography.caption.copy(fontWeight = FontWeight.Bold),
++                    )
++                }
++                if (label.isCollapsed) {
++                    Spacer(modifier = Modifier.width(4.dp))
++                    Text(
++                        text = label.tabCount.toString(),
++                        color = if (group.title.isBlank()) theme.primary else theme.onPrimary,
++                        maxLines = 1,
++                        style = FirefoxTheme.typography.caption,
++                    )
++                }
++            }
++
++            DropdownMenu(
++                menuItems =
++                    listOf(
++                        MenuItem.TextItem(text = Text.Resource(R.string.tabstrip_groups_edit)) {
++                            openTabGroupFlow(TabGroupFlowEntryPoint.EditGroup(currentGroup.id))
++                        },
++                        MenuItem.TextItem(text = Text.Resource(R.string.tabstrip_groups_ungroup)) {
++                            ungroup(currentGroup)
++                        },
++                        MenuItem.TextItem(text = Text.Resource(R.string.tabstrip_groups_close)) {
++                            closeGroup(currentGroup)
++                        },
++                    ),
++                expanded = isMenuShown,
++                onDismissRequest = { isMenuShown = false },
++            )
++        }
++    }
++}
++
++private fun TabGroupData.groupOf(tabId: String): TabGroup? =
++    tabGroupAssignments[tabId]?.let { groupId -> tabGroups.firstOrNull { it.id == groupId } }
++
++/** The theme of a group, stored like Firefox does (the name of the theme); an unknown one is the first theme. */
++private fun String.toTabGroupTheme(): TabGroupTheme =
++    TabGroupTheme.entries.firstOrNull { it.name == this } ?: TabGroupTheme.entries.first()
++
++/** Handles the clicks with the right button of a mouse before the other gestures, which don't get them. */
++private suspend fun PointerInputScope.detectRightClicks(onRightClick: () -> Unit) {
++    awaitEachGesture {
++        val down = awaitPointerEvent(PointerEventPass.Initial)
++        if (down.type != PointerEventType.Press || !down.buttons.isSecondaryPressed) return@awaitEachGesture
++        down.changes.forEach { it.consume() }
++        val up = waitForUpOrCancellation(PointerEventPass.Initial) ?: return@awaitEachGesture
++        up.consume()
++        onRightClick()
++    }
++}
+diff --git a/mobile/android/fenix/app/src/main/res/values-it/tab_groups_strings.xml b/mobile/android/fenix/app/src/main/res/values-it/tab_groups_strings.xml
+new file mode 100644
+index 00000000..53cda5ff
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/res/values-it/tab_groups_strings.xml
+@@ -0,0 +1,15 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++<resources>
++    <string name="tabstrip_groups_add_tab">Aggiungi la scheda a un gruppo</string>
++    <string name="tabstrip_groups_remove_tab">Rimuovi dal gruppo</string>
++    <string name="tabstrip_groups_edit">Modifica il gruppo</string>
++    <string name="tabstrip_groups_ungroup">Separa il gruppo</string>
++    <string name="tabstrip_groups_close">Chiudi il gruppo</string>
++    <string name="tabstrip_groups_label_description">Gruppo di schede %1$s</string>
++    <string name="tabstrip_groups_unnamed">senza nome</string>
++    <string name="tabstrip_groups_collapsed">Chiuso</string>
++    <string name="tabstrip_groups_expanded">Aperto</string>
++</resources>
+diff --git a/mobile/android/fenix/app/src/main/res/values/tab_groups_strings.xml b/mobile/android/fenix/app/src/main/res/values/tab_groups_strings.xml
+new file mode 100644
+index 00000000..fa99d9e2
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/res/values/tab_groups_strings.xml
+@@ -0,0 +1,25 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++<!-- Tab groups in the tab strip of the patch with the Chrome-like tab strip. Only translated in Italian. -->
++<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
++    <!-- Item of the menu of a tab of the tab strip, which opens the tab group picker of Firefox. -->
++    <string name="tabstrip_groups_add_tab">Add tab to group</string>
++    <!-- Item of the menu of a tab of the tab strip that is in a tab group. -->
++    <string name="tabstrip_groups_remove_tab">Remove from group</string>
++    <!-- Item of the menu of the label of a tab group in the tab strip, which edits its title and color. -->
++    <string name="tabstrip_groups_edit">Edit group</string>
++    <!-- Item of the menu of the label of a tab group in the tab strip, which removes the group keeping its tabs. -->
++    <string name="tabstrip_groups_ungroup">Ungroup</string>
++    <!-- Item of the menu of the label of a tab group in the tab strip, which closes the group like the tabs tray. -->
++    <string name="tabstrip_groups_close">Close group</string>
++    <!-- Description of the label of a tab group in the tab strip. %1$s is the title of the group. -->
++    <string name="tabstrip_groups_label_description">Tab group %1$s</string>
++    <!-- Title of a tab group without title, in the description of its label. -->
++    <string name="tabstrip_groups_unnamed">without name</string>
++    <!-- State of a collapsed tab group in the tab strip, whose tabs are hidden. -->
++    <string name="tabstrip_groups_collapsed">Collapsed</string>
++    <!-- State of an expanded tab group in the tab strip. -->
++    <string name="tabstrip_groups_expanded">Expanded</string>
++</resources>
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/TabGroupsTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/TabGroupsTest.kt
+new file mode 100644
+index 00000000..af2a7f65
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/TabGroupsTest.kt
+@@ -0,0 +1,100 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import mozilla.components.feature.tabgroups.storage.data.TabGroup
++import mozilla.components.feature.tabgroups.storage.data.TabGroupData
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class TabGroupsTest {
++    private val work = group("work", tabIds = listOf("b", "d"))
++    private val news = group("news", tabIds = listOf("e"), closed = true)
++    private val data =
++        TabGroupData(
++            tabGroups = listOf(work, news),
++            tabGroupAssignments = mapOf("b" to "work", "d" to "work", "e" to "news"),
++        )
++    private val tabIds = listOf("a", "b", "c", "d", "e")
++
++    @Test
++    fun `WHEN arranging the tab strip THEN each group shows its label and its tabs together at its first tab`() {
++        val entries = groupedTabStrip(tabIds, data, collapsedGroupIds = emptySet(), selectedTabId = "a")
++
++        assertEquals(listOf(tab("a"), label(work), tab("b"), tab("d"), tab("c")), entries)
++    }
++
++    @Test
++    fun `GIVEN a collapsed group WHEN arranging the tab strip THEN only its label is shown`() {
++        val entries = groupedTabStrip(tabIds, data, collapsedGroupIds = setOf("work"), selectedTabId = "a")
++
++        assertEquals(listOf(tab("a"), label(work, isCollapsed = true), tab("c")), entries)
++    }
++
++    @Test
++    fun `GIVEN a tab of a collapsed or closed group is selected WHEN arranging the tab strip THEN it is shown`() {
++        assertEquals(
++            listOf(tab("a"), label(work, isCollapsed = true), tab("d"), tab("c")),
++            groupedTabStrip(tabIds, data, collapsedGroupIds = setOf("work"), selectedTabId = "d"),
++        )
++        assertEquals(
++            listOf(tab("a"), label(work), tab("b"), tab("d"), tab("c"), tab("e")),
++            groupedTabStrip(tabIds, data, collapsedGroupIds = emptySet(), selectedTabId = "e"),
++        )
++    }
++
++    @Test
++    fun `WHEN checking if a tab is hidden THEN the tabs of collapsed and closed groups are, except the selected one`() {
++        assertTrue(isTabHiddenByGroup("b", data, setOf("work"), selectedTabId = "a"))
++        assertFalse(isTabHiddenByGroup("b", data, setOf("work"), selectedTabId = "b"))
++        assertFalse(isTabHiddenByGroup("b", data, emptySet(), selectedTabId = "a"))
++        assertTrue(isTabHiddenByGroup("e", data, emptySet(), selectedTabId = "a"))
++        assertFalse(isTabHiddenByGroup("a", data, setOf("work"), selectedTabId = null))
++    }
++
++    @Test
++    fun `GIVEN the tabs of a group are apart WHEN keeping them together THEN they move after the first one`() {
++        assertEquals(listOf("d") to "b", tabGroupMove(tabIds, data))
++        // Already together, and the closed groups don't move.
++        assertNull(tabGroupMove(listOf("a", "b", "d", "c", "e"), data))
++        assertNull(tabGroupMove(listOf("e", "a", "b", "d"), data))
++    }
++
++    @Test
++    fun `WHEN leaving a group THEN the nearest tab after it is selected, otherwise the one before it`() {
++        val inWork = { id: String -> data.tabGroupAssignments[id] == "work" }
++
++        assertEquals("c", nearestTabOutside(tabIds, "b", inWork))
++        assertEquals("e", nearestTabOutside(tabIds, "d", inWork))
++        assertEquals("a", nearestTabOutside(listOf("a", "b", "d"), "d", inWork))
++        assertNull(nearestTabOutside(listOf("b", "d"), "b", inWork))
++    }
++
++    @Test
++    fun `WHEN estimating the width of a label THEN it grows with the title, up to a limit`() {
++        assertTrue(tabGroupLabelWidthDp("", isCollapsed = false) < tabGroupLabelWidthDp("Work", isCollapsed = false))
++        assertTrue(tabGroupLabelWidthDp("Work", isCollapsed = false) < tabGroupLabelWidthDp("Work", isCollapsed = true))
++        assertEquals(
++            tabGroupLabelWidthDp("A very long title for a group", isCollapsed = false),
++            tabGroupLabelWidthDp("A very long title for a group, longer", isCollapsed = false),
++        )
++    }
++
++    private fun tab(id: String) = GroupedTabStripEntry.Tab(id)
++
++    private fun label(
++        group: TabGroup,
++        isCollapsed: Boolean = false,
++    ) = GroupedTabStripEntry.Label(group, isCollapsed, tabCount = group.tabIds.size)
++
++    private fun group(
++        id: String,
++        tabIds: List<String>,
++        closed: Boolean = false,
++    ) = TabGroup(id = id, title = id, theme = "Blue", closed = closed, lastModified = 0, tabIds = tabIds)
++}

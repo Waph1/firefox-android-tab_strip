@@ -23,7 +23,7 @@ schermo grande" compare e sparisce **al volo** aprendo e chiudendo il telefono, 
 | 5  | Barra dei segnalibri                              | `0050-bookmarks-bar`         | facoltativa | fatto        |
 | 6  | Mouse e trackpad                                  | `0060-mouse`                 | facoltativa | fatto        |
 | 7  | Icona audio sulle schede                          | `0070-tab-audio`             | facoltativa | fatto        |
-| 8  | Gruppi di schede nella tab strip                  | `0080-tab-groups`            | facoltativa | da fare      |
+| 8  | Gruppi di schede nella tab strip                  | `0080-tab-groups`            | facoltativa | fatto        |
 
 L'ordine della tabella è l'ordine di lavoro: prima l'infrastruttura, poi dal più semplice e utile al più complesso e
 fragile. I nomi dei file sono indicativi.
@@ -302,6 +302,18 @@ facoltativa.
 Non in questa versione: trascinare una scheda dentro o fuori da un gruppo nella strip; nuove schede aperte da una
 scheda del gruppo che entrano automaticamente nel gruppo. Da verificare: come upstream gestisce le schede private
 nei gruppi.
+
+**Fatto**, con i nuovi punti di aggancio `tabStripEntries` e `isTabHidden` della `0002` (e `TabStripTab`,
+`tabStripMenuItems`). Differenze dal piano:
+
+- nel menu della scheda c'è una sola voce, **Aggiungi la scheda a un gruppo**, che apre la scelta del gruppo di
+  Firefox (elenco dei gruppi e creazione di uno nuovo) invece di «Aggiungi a nuovo gruppo» e «Aggiungi al gruppo ▸»;
+- **Chiudi il gruppo** lo chiude come la panoramica delle schede di Firefox: il gruppo e le sue schede spariscono
+  dalla tab strip e si riaprono dalla panoramica (non chiude le schede, così non si perde nulla);
+- chiudere/riaprire il gruppo dall'etichetta è solo della tab strip (ricordato tra un avvio e l'altro); un gruppo
+  chiuso così mostra quante schede ha;
+- le schede private non hanno gruppi, come upstream; trascinando una scheda fuori dal suo gruppo, torna vicino alle
+  altre del gruppo.
 
 ---
 

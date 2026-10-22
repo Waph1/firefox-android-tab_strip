@@ -207,10 +207,10 @@ index 00000000..cc1509eb
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/KeyboardShortcutsFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/KeyboardShortcutsFeature.kt
 new file mode 100644
-index 00000000..c61cfdb5
+index 00000000..2a20094a
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/KeyboardShortcutsFeature.kt
-@@ -0,0 +1,231 @@
+@@ -0,0 +1,234 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -344,7 +344,10 @@ index 00000000..c61cfdb5
 +            -> {
 +                val isPrivate = selectedTab?.content?.private ?: activity.browsingModeManager.mode.isPrivate
 +                val tabs = store.state.getNormalOrPrivateTabs(isPrivate)
-+                val tabId = tabToSelect(shortcut, tabs.map { it.id }, selectedTab?.id) ?: return
++                // The tabs hidden in the tab strip (e.g. in a collapsed tab group) are skipped.
++                val tabIds =
++                    tabs.map { it.id }.filter { it == selectedTab?.id || !PatchFeatureHooks.isTabHiddenInTabStrip(it) }
++                val tabId = tabToSelect(shortcut, tabIds, selectedTab?.id) ?: return
 +                components.useCases.tabsUseCases.selectTab(tabId)
 +                // On the browser, selecting a tab showing the homepage shows the homepage (AboutHomeBinding).
 +                if (tabs.first { it.id == tabId }.content.url != ABOUT_HOME_URL) navController.openToBrowser()
