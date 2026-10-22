@@ -1,0 +1,717 @@
+diff --git a/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/background.js b/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/background.js
+new file mode 100644
+index 00000000..e4ba0ed5
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/background.js
+@@ -0,0 +1,55 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++"use strict";
++
++// The zooms of the pages, sent by the app (see PageZoomFeature.kt). The pages aren't zoomed until it sends them.
++let state = { enabled: false, defaultZoom: 100, sites: {}, privateSites: {} };
++
++/** Returns the zoom of a page, in percent, like PageZoomState.siteZoom in the app. */
++function zoomFor(url, isPrivate) {
++  if (!state.enabled || !url) {
++    return 100;
++  }
++  let site;
++  try {
++    const parsed = new URL(url);
++    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
++      return 100;
++    }
++    site = parsed.hostname.toLowerCase();
++  } catch (e) {
++    return 100;
++  }
++  const zooms = isPrivate ? state.privateSites : state.sites;
++  return zooms[site] ?? state.defaultZoom;
++}
++
++/** Sends its zoom to every open page. */
++async function updateAllTabs() {
++  const tabs = await browser.tabs.query({});
++  for (const tab of tabs) {
++    browser.tabs
++      .sendMessage(tab.id, { type: "zoom", zoom: zoomFor(tab.url, tab.incognito) })
++      .catch(() => {
++        // The page has no content script, e.g. an internal page of Firefox.
++      });
++  }
++}
++
++const port = browser.runtime.connectNative("chromeTabstripZoom");
++port.onMessage.addListener(message => {
++  if (message.type === "state") {
++    state = message;
++    updateAllTabs();
++  }
++});
++
++// The content script of a page asks for its zoom while the page loads.
++browser.runtime.onMessage.addListener((message, sender) => {
++  if (message.type === "getZoom" && sender.tab) {
++    return Promise.resolve(zoomFor(sender.url || sender.tab.url, sender.tab.incognito));
++  }
++  return undefined;
++});
+diff --git a/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/content.js b/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/content.js
+new file mode 100644
+index 00000000..c7a7db86
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/content.js
+@@ -0,0 +1,42 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++"use strict";
++
++// Whether this script zoomed the page: at 100% it only removes its own zoom, not one set by the page.
++let isZoomed = false;
++
++/**
++ * Zooms the page with the CSS zoom property of its root element, which lays it out again like the zoom of Firefox
++ * for desktop.
++ */
++function applyZoom(zoom) {
++  const root = document.documentElement;
++  if (!root) {
++    // Very early in the load: try again once the root element exists.
++    document.addEventListener("readystatechange", () => applyZoom(zoom), { once: true });
++    return;
++  }
++  if (zoom === 100) {
++    if (isZoomed) {
++      root.style.removeProperty("zoom");
++      isZoomed = false;
++    }
++  } else {
++    root.style.setProperty("zoom", String(zoom / 100), "important");
++    isZoomed = true;
++  }
++}
++
++browser.runtime.onMessage.addListener(message => {
++  if (message.type === "zoom") {
++    applyZoom(message.zoom);
++  }
++});
++
++browser.runtime.sendMessage({ type: "getZoom" }).then(zoom => {
++  if (typeof zoom === "number") {
++    applyZoom(zoom);
++  }
++});
+diff --git a/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/manifest.json b/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/manifest.json
+new file mode 100644
+index 00000000..4993a683
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/manifest.json
+@@ -0,0 +1,22 @@
++{
++  "manifest_version": 2,
++  "name": "Page zoom",
++  "version": "1.0",
++  "description": "Zooms the pages like Firefox for desktop, for the patch with the Chrome-like tab strip.",
++  "browser_specific_settings": {
++    "gecko": {
++      "id": "page-zoom@chrome-tabstrip"
++    }
++  },
++  "permissions": ["geckoViewAddons", "nativeMessaging", "tabs", "<all_urls>"],
++  "background": {
++    "scripts": ["background.js"]
++  },
++  "content_scripts": [
++    {
++      "matches": ["http://*/*", "https://*/*"],
++      "js": ["content.js"],
++      "run_at": "document_start"
++    }
++  ]
++}
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PageZoom.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PageZoom.kt
+new file mode 100644
+index 00000000..802815b9
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PageZoom.kt
+@@ -0,0 +1,105 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import android.view.KeyEvent
++import java.net.MalformedURLException
++import java.net.URL
++import java.util.Locale
++
++/** The zoom levels of the pages, in percent, like in Firefox for desktop. */
++internal val PAGE_ZOOM_LEVELS = listOf(30, 50, 67, 80, 90, 100, 110, 120, 133, 150, 170, 200, 240, 300)
++
++/** The zoom of the pages that aren't zoomed, in percent. */
++internal const val NO_PAGE_ZOOM = 100
++
++/** Returns the next zoom level after [zoom], or the last one. */
++internal fun zoomedIn(zoom: Int): Int = PAGE_ZOOM_LEVELS.firstOrNull { it > zoom } ?: PAGE_ZOOM_LEVELS.last()
++
++/** Returns the zoom level before [zoom], or the first one. */
++internal fun zoomedOut(zoom: Int): Int = PAGE_ZOOM_LEVELS.lastOrNull { it < zoom } ?: PAGE_ZOOM_LEVELS.first()
++
++/**
++ * Returns the site of [url] whose zoom is remembered (its host, like the content script of the extension), or `null`
++ * for the pages that can't be zoomed (e.g. the internal pages of Firefox).
++ */
++internal fun zoomSite(url: String): String? =
++    try {
++        URL(url).takeIf { it.protocol == "http" || it.protocol == "https" }?.host?.lowercase(Locale.ROOT)
++    } catch (e: MalformedURLException) {
++        null
++    }
++
++/**
++ * The zoom of the pages.
++ *
++ * @property isEnabled Whether the pages are zoomed: only on large screens (the ones showing the tab strip).
++ * @property defaultZoom The zoom of the sites without a zoom of their own, in percent.
++ * @property sites The zoom of the sites zoomed by the user, in percent, by site (see [zoomSite]).
++ * @property privateSites The zoom of the sites zoomed by the user in private tabs, which isn't saved.
++ */
++internal data class PageZoomState(
++    val isEnabled: Boolean = false,
++    val defaultZoom: Int = NO_PAGE_ZOOM,
++    val sites: Map<String, Int> = emptyMap(),
++    val privateSites: Map<String, Int> = emptyMap(),
++) {
++    /** The zoom of the site of [url] when the screen is large, in percent (ignores [isEnabled]). */
++    fun siteZoom(
++        url: String,
++        isPrivate: Boolean,
++    ): Int {
++        val site = zoomSite(url) ?: return NO_PAGE_ZOOM
++        return (if (isPrivate) privateSites else sites)[site] ?: defaultZoom
++    }
++
++    /**
++     * Returns the state with the zoom of the site of [url] set to [zoom]. The site forgets its zoom when it's the
++     * default one.
++     */
++    fun withSiteZoom(
++        url: String,
++        isPrivate: Boolean,
++        zoom: Int,
++    ): PageZoomState {
++        val site = zoomSite(url) ?: return this
++        val zooms = (if (isPrivate) privateSites else sites).toMutableMap()
++        if (zoom == defaultZoom) zooms.remove(site) else zooms[site] = zoom
++        return if (isPrivate) copy(privateSites = zooms) else copy(sites = zooms)
++    }
++}
++
++/** A change of the zoom asked with the keyboard, like in Firefox for desktop. */
++internal enum class PageZoomShortcut {
++    /** Ctrl and +, or Ctrl and =. */
++    ZOOM_IN,
++
++    /** Ctrl and -. */
++    ZOOM_OUT,
++
++    /** Ctrl and 0: back to the default zoom. */
++    RESET,
++}
++
++/**
++ * Returns the zoom shortcut of a key pressed with the given modifiers, or `null` if it isn't one. Shift is allowed,
++ * since + needs it on some layouts.
++ *
++ * @param keyCode The key, see [KeyEvent.getKeyCode].
++ * @param metaState The modifiers, see [KeyEvent.getMetaState].
++ */
++internal fun pageZoomShortcut(
++    keyCode: Int,
++    metaState: Int,
++): PageZoomShortcut? {
++    val otherModifiers = KeyEvent.META_ALT_ON or KeyEvent.META_META_ON
++    if ((metaState and KeyEvent.META_CTRL_ON) == 0 || (metaState and otherModifiers) != 0) return null
++    return when (keyCode) {
++        KeyEvent.KEYCODE_PLUS, KeyEvent.KEYCODE_EQUALS, KeyEvent.KEYCODE_NUMPAD_ADD -> PageZoomShortcut.ZOOM_IN
++        KeyEvent.KEYCODE_MINUS, KeyEvent.KEYCODE_NUMPAD_SUBTRACT -> PageZoomShortcut.ZOOM_OUT
++        KeyEvent.KEYCODE_0, KeyEvent.KEYCODE_NUMPAD_0 -> PageZoomShortcut.RESET
++        else -> null
++    }
++}
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PageZoomFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PageZoomFeature.kt
+new file mode 100644
+index 00000000..64ad77aa
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PageZoomFeature.kt
+@@ -0,0 +1,307 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import android.content.Context
++import android.content.SharedPreferences
++import android.view.KeyEvent
++import android.widget.Toast
++import androidx.compose.foundation.layout.Row
++import androidx.compose.material3.Text
++import androidx.compose.material3.TextButton
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.collectAsState
++import androidx.compose.runtime.getValue
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.res.painterResource
++import androidx.compose.ui.res.stringResource
++import androidx.compose.ui.semantics.contentDescription
++import androidx.compose.ui.semantics.semantics
++import androidx.core.content.edit
++import androidx.navigation.findNavController
++import androidx.preference.ListPreference
++import androidx.preference.Preference
++import androidx.preference.PreferenceCategory
++import androidx.preference.PreferenceFragmentCompat
++import kotlinx.coroutines.MainScope
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.distinctUntilChanged
++import kotlinx.coroutines.flow.map
++import kotlinx.coroutines.launch
++import mozilla.components.browser.state.selector.privateTabs
++import mozilla.components.browser.state.selector.selectedTab
++import mozilla.components.concept.engine.webextension.MessageHandler
++import mozilla.components.concept.engine.webextension.Port
++import mozilla.components.support.base.log.logger.Logger
++import mozilla.components.ui.icons.R as iconsR
++import org.json.JSONObject
++import org.mozilla.fenix.HomeActivity
++import org.mozilla.fenix.R
++import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
++import org.mozilla.fenix.components.menu.MenuAccessPoint
++import org.mozilla.fenix.components.menu.compose.MenuGroup
++import org.mozilla.fenix.components.menu.compose.MenuItem
++import org.mozilla.fenix.ext.components
++
++private const val EXTENSION_ID = "page-zoom@chrome-tabstrip"
++private const val EXTENSION_URL = "resource://android/assets/extensions/chrome-tabstrip-zoom/"
++private const val NATIVE_APP = "chromeTabstripZoom"
++
++private const val PREFERENCES_NAME = "chrome_tabstrip_page_zoom"
++private const val PREF_DEFAULT_ZOOM = "default_zoom"
++private const val PREF_SITE_PREFIX = "site:"
++
++/**
++ * Optional feature "page zoom" (`0040-page-zoom.patch`): on large screens (the ones showing the tab strip) the pages
++ * are zoomed like in Firefox for desktop, with a default zoom and a zoom remembered for each site (not in private
++ * tabs).
++ *
++ * GeckoView doesn't offer the full page zoom of Firefox for desktop, so a built-in extension (in
++ * `assets/extensions/chrome-tabstrip-zoom`) applies the CSS `zoom` property to the pages, which lays them out again
++ * like the zoom of the desktop. The app keeps the zooms and sends them to the extension (see [PageZoomState]).
++ *
++ * The zoom is changed from the main menu (Zoom − 100% +) or with Ctrl + / - / 0, and the default zoom in Settings →
++ * Customize. On small screens the pages aren't zoomed, and are zoomed again when the screen is large again.
++ */
++object PageZoomFeature : PatchFeatureHooks {
++    private val logger = Logger("PageZoomFeature")
++    private val scope = MainScope()
++    private val state = MutableStateFlow(PageZoomState())
++
++    /** The page of the selected tab: its url, and whether the tab is private. Followed once the feature starts. */
++    private val selectedPage = MutableStateFlow<Pair<String, Boolean>?>(null)
++    private var preferences: SharedPreferences? = null
++    private var port: Port? = null
++    private var toast: Toast? = null
++
++    private val messageHandler =
++        object : MessageHandler {
++            override fun onPortConnected(port: Port) {
++                this@PageZoomFeature.port = port
++                send(state.value)
++            }
++
++            override fun onPortDisconnected(port: Port) {
++                if (this@PageZoomFeature.port === port) this@PageZoomFeature.port = null
++            }
++        }
++
++    override fun onActivityCreated(activity: HomeActivity) {
++        if (preferences != null) return
++        val preferences = activity.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
++        this.preferences = preferences
++        state.value = loadState(preferences)
++
++        val components = activity.components
++        components.core.engine.installBuiltInWebExtension(
++            id = EXTENSION_ID,
++            url = EXTENSION_URL,
++            onSuccess = { it.registerBackgroundMessageHandler(NATIVE_APP, messageHandler) },
++            onError = { logger.error("Can't install the page zoom extension", it) },
++        )
++
++        scope.launch { state.collect { send(it) } }
++        scope.launch {
++            AdaptiveTabStrip.isLargeWindow.collect { isLarge -> update { it.copy(isEnabled = isLarge == true) } }
++        }
++        scope.launch {
++            components.core.store.stateFlow
++                .map { browserState -> browserState.selectedTab?.let { it.content.url to it.content.private } }
++                .distinctUntilChanged()
++                .collect { selectedPage.value = it }
++        }
++        // Like the private tabs, their zooms are forgotten once they are all closed.
++        scope.launch {
++            components.core.store.stateFlow
++                .map { it.privateTabs.isEmpty() }
++                .distinctUntilChanged()
++                .collect { noPrivateTabs -> if (noPrivateTabs) update { it.copy(privateSites = emptyMap()) } }
++        }
++    }
++
++    override fun onKeyEvent(
++        activity: HomeActivity,
++        event: KeyEvent,
++    ): Boolean {
++        val shortcut = pageZoomShortcut(event.keyCode, event.metaState) ?: return false
++        if (AdaptiveTabStrip.isLargeWindow.value != true) return false
++        val navController = runCatching { activity.findNavController(R.id.container) }.getOrNull() ?: return false
++        if (navController.currentDestination?.id != R.id.browserFragment) return false
++        if (event.action == KeyEvent.ACTION_DOWN) {
++            val zoom = changeZoom(shortcut) ?: return true
++            // There is no zoom indicator in the address bar: tell the new zoom.
++            toast?.cancel()
++            toast = Toast.makeText(activity, activity.getString(R.string.page_zoom_toast, zoom), Toast.LENGTH_SHORT)
++            toast?.show()
++        }
++        return true
++    }
++
++    @Composable
++    override fun MainMenuItems(accessPoint: MenuAccessPoint) {
++        val isLargeWindow by AdaptiveTabStrip.isLargeWindow.collectAsState()
++        val zoomState by state.collectAsState()
++        val page by selectedPage.collectAsState()
++        val (url, isPrivate) = page ?: return
++        if (accessPoint != MenuAccessPoint.Browser || isLargeWindow != true || zoomSite(url) == null) return
++        val zoom = zoomState.siteZoom(url, isPrivate)
++
++        MenuGroup {
++            MenuItem(
++                label = stringResource(R.string.page_zoom_menu_item),
++                beforeIconPainter = painterResource(iconsR.drawable.mozac_ic_search_24),
++                afterContent = {
++                    PageZoomControls(
++                        zoom = zoom,
++                        defaultZoom = zoomState.defaultZoom,
++                        onZoomOut = { changeZoom(PageZoomShortcut.ZOOM_OUT) },
++                        onReset = { changeZoom(PageZoomShortcut.RESET) },
++                        onZoomIn = { changeZoom(PageZoomShortcut.ZOOM_IN) },
++                    )
++                },
++            )
++        }
++    }
++
++    override fun addCustomizationPreferences(fragment: PreferenceFragmentCompat) {
++        val context = fragment.requireContext()
++        val category =
++            PreferenceCategory(context).apply {
++                title = context.getString(R.string.page_zoom_preferences_category)
++                isIconSpaceReserved = false
++            }
++        fragment.preferenceScreen.addPreference(category)
++
++        val levels = PAGE_ZOOM_LEVELS.map { it.toString() }.toTypedArray()
++        category.addPreference(
++            ListPreference(context).apply {
++                isPersistent = false
++                isIconSpaceReserved = false
++                title = context.getString(R.string.page_zoom_default_title)
++                dialogTitle = title
++                entries = PAGE_ZOOM_LEVELS.map { context.getString(R.string.page_zoom_percent, it) }.toTypedArray()
++                entryValues = levels
++                value = state.value.defaultZoom.toString()
++                summary = context.getString(R.string.page_zoom_percent, state.value.defaultZoom)
++                setOnPreferenceChangeListener { preference, newValue ->
++                    val zoom = (newValue as String).toInt()
++                    update { it.copy(defaultZoom = zoom) }
++                    preference.summary = context.getString(R.string.page_zoom_percent, zoom)
++                    true
++                }
++            },
++        )
++
++        category.addPreference(
++            Preference(context).apply {
++                isIconSpaceReserved = false
++                title = context.getString(R.string.page_zoom_reset_sites_title)
++                summary = context.getString(R.string.page_zoom_reset_sites_summary, state.value.sites.size)
++                setOnPreferenceClickListener { preference ->
++                    update { it.copy(sites = emptyMap(), privateSites = emptyMap()) }
++                    preference.summary = context.getString(R.string.page_zoom_reset_sites_summary, 0)
++                    Toast.makeText(context, R.string.page_zoom_sites_reset, Toast.LENGTH_SHORT).show()
++                    true
++                }
++            },
++        )
++    }
++
++    /** Changes the zoom of the site of the selected tab, and returns the new zoom (`null` if it can't be zoomed). */
++    private fun changeZoom(shortcut: PageZoomShortcut): Int? {
++        val (url, isPrivate) = selectedPage.value ?: return null
++        if (zoomSite(url) == null) return null
++        val current = state.value
++        val zoom =
++            when (shortcut) {
++                PageZoomShortcut.ZOOM_IN -> zoomedIn(current.siteZoom(url, isPrivate))
++                PageZoomShortcut.ZOOM_OUT -> zoomedOut(current.siteZoom(url, isPrivate))
++                PageZoomShortcut.RESET -> current.defaultZoom
++            }
++        update { it.withSiteZoom(url, isPrivate, zoom) }
++        return zoom
++    }
++
++    private fun update(change: (PageZoomState) -> PageZoomState) {
++        val old = state.value
++        val new = change(old)
++        if (new == old) return
++        state.value = new
++        if (new.defaultZoom != old.defaultZoom || new.sites != old.sites) {
++            preferences?.let { saveState(it, new) }
++        }
++    }
++
++    private fun send(state: PageZoomState) {
++        port?.postMessage(
++            JSONObject()
++                .put("type", "state")
++                .put("enabled", state.isEnabled)
++                .put("defaultZoom", state.defaultZoom)
++                .put("sites", JSONObject(state.sites))
++                .put("privateSites", JSONObject(state.privateSites)),
++        )
++    }
++
++    private fun loadState(preferences: SharedPreferences) =
++        PageZoomState(
++            defaultZoom = preferences.getInt(PREF_DEFAULT_ZOOM, NO_PAGE_ZOOM),
++            sites =
++                preferences.all
++                    .filterKeys { it.startsWith(PREF_SITE_PREFIX) }
++                    .mapNotNull { (key, value) -> (value as? Int)?.let { key.removePrefix(PREF_SITE_PREFIX) to it } }
++                    .toMap(),
++        )
++
++    private fun saveState(
++        preferences: SharedPreferences,
++        state: PageZoomState,
++    ) {
++        preferences.edit {
++            clear()
++            putInt(PREF_DEFAULT_ZOOM, state.defaultZoom)
++            state.sites.forEach { (site, zoom) -> putInt(PREF_SITE_PREFIX + site, zoom) }
++        }
++    }
++}
++
++/** The − 100% + buttons of the zoom item of the main menu; the percentage goes back to the default zoom. */
++@Composable
++private fun PageZoomControls(
++    zoom: Int,
++    defaultZoom: Int,
++    onZoomOut: () -> Unit,
++    onReset: () -> Unit,
++    onZoomIn: () -> Unit,
++) {
++    val zoomOutDescription = stringResource(R.string.page_zoom_zoom_out)
++    val resetDescription =
++        stringResource(R.string.page_zoom_reset, stringResource(R.string.page_zoom_percent, defaultZoom))
++    val zoomInDescription = stringResource(R.string.page_zoom_zoom_in)
++    Row(verticalAlignment = Alignment.CenterVertically) {
++        TextButton(
++            onClick = onZoomOut,
++            enabled = zoom > PAGE_ZOOM_LEVELS.first(),
++            modifier = Modifier.semantics { contentDescription = zoomOutDescription },
++        ) {
++            Text("−")
++        }
++        TextButton(
++            onClick = onReset,
++            enabled = zoom != defaultZoom,
++            modifier = Modifier.semantics { contentDescription = resetDescription },
++        ) {
++            Text(stringResource(R.string.page_zoom_percent, zoom))
++        }
++        TextButton(
++            onClick = onZoomIn,
++            enabled = zoom < PAGE_ZOOM_LEVELS.last(),
++            modifier = Modifier.semantics { contentDescription = zoomInDescription },
++        ) {
++            Text("+")
++        }
++    }
++}
+diff --git a/mobile/android/fenix/app/src/main/res/values-it/page_zoom_strings.xml b/mobile/android/fenix/app/src/main/res/values-it/page_zoom_strings.xml
+new file mode 100644
+index 00000000..bf012633
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/res/values-it/page_zoom_strings.xml
+@@ -0,0 +1,17 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++<resources>
++    <string name="page_zoom_menu_item">Zoom</string>
++    <string name="page_zoom_percent">%1$d%%</string>
++    <string name="page_zoom_zoom_out">Riduci</string>
++    <string name="page_zoom_zoom_in">Ingrandisci</string>
++    <string name="page_zoom_reset">Torna a %1$s</string>
++    <string name="page_zoom_toast">Zoom %1$d%%</string>
++    <string name="page_zoom_preferences_category">Zoom delle pagine (schermo grande)</string>
++    <string name="page_zoom_default_title">Zoom predefinito</string>
++    <string name="page_zoom_reset_sites_title">Azzera lo zoom dei siti</string>
++    <string name="page_zoom_reset_sites_summary">Siti con uno zoom proprio: %1$d</string>
++    <string name="page_zoom_sites_reset">Lo zoom dei siti è stato azzerato</string>
++</resources>
+diff --git a/mobile/android/fenix/app/src/main/res/values/page_zoom_strings.xml b/mobile/android/fenix/app/src/main/res/values/page_zoom_strings.xml
+new file mode 100644
+index 00000000..4b54c957
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/res/values/page_zoom_strings.xml
+@@ -0,0 +1,30 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++<!-- Page zoom of the patch with the Chrome-like tab strip. Only translated in Italian. -->
++<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
++    <!-- Item of the main menu changing the zoom of the page, followed by the − 100% + buttons. -->
++    <string name="page_zoom_menu_item">Zoom</string>
++    <!-- A zoom level. %1$d is the zoom in percent. -->
++    <string name="page_zoom_percent">%1$d%%</string>
++    <!-- Description of the − button of the zoom item of the main menu. -->
++    <string name="page_zoom_zoom_out">Zoom out</string>
++    <!-- Description of the + button of the zoom item of the main menu. -->
++    <string name="page_zoom_zoom_in">Zoom in</string>
++    <!-- Description of the zoom level of the zoom item of the main menu, which goes back to the default zoom. %1$s is
++         the default zoom (e.g. 100%). -->
++    <string name="page_zoom_reset">Back to %1$s</string>
++    <!-- Message shown when the zoom is changed with the keyboard. %1$d is the zoom in percent. -->
++    <string name="page_zoom_toast">Zoom %1$d%%</string>
++    <!-- Title of the zoom preferences in Settings → Customize. -->
++    <string name="page_zoom_preferences_category">Page zoom (large screen)</string>
++    <!-- Preference choosing the zoom of the sites without a zoom of their own. -->
++    <string name="page_zoom_default_title">Default zoom</string>
++    <!-- Preference forgetting the zoom of every site. -->
++    <string name="page_zoom_reset_sites_title">Reset the zoom of the sites</string>
++    <!-- Summary of the preference forgetting the zoom of every site. %1$d is the number of sites with a zoom. -->
++    <string name="page_zoom_reset_sites_summary">Sites with their own zoom: %1$d</string>
++    <!-- Message shown when the zoom of every site was forgotten. -->
++    <string name="page_zoom_sites_reset">The zoom of the sites was reset</string>
++</resources>
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/PageZoomTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/PageZoomTest.kt
+new file mode 100644
+index 00000000..d4359b68
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/PageZoomTest.kt
+@@ -0,0 +1,91 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import android.view.KeyEvent
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++private const val CTRL = KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
++
++class PageZoomTest {
++    @Test
++    fun `WHEN zooming in or out THEN the zoom goes to the next level, like in Firefox for desktop`() {
++        assertEquals(110, zoomedIn(100))
++        assertEquals(133, zoomedIn(120))
++        assertEquals(300, zoomedIn(300))
++        assertEquals(90, zoomedOut(100))
++        assertEquals(30, zoomedOut(30))
++        // A zoom between two levels.
++        assertEquals(110, zoomedIn(105))
++        assertEquals(100, zoomedOut(105))
++    }
++
++    @Test
++    fun `WHEN getting the site of a page THEN it is its host, only for web pages`() {
++        assertEquals("example.com", zoomSite("https://Example.com/path?query"))
++        assertEquals("www.example.com", zoomSite("http://www.example.com:8080/"))
++        assertNull(zoomSite("about:home"))
++        assertNull(zoomSite("file:///sdcard/page.html"))
++        assertNull(zoomSite("not a url"))
++    }
++
++    @Test
++    fun `GIVEN zoomed sites WHEN getting the zoom of a page THEN it is the one of its site, or the default one`() {
++        val state =
++            PageZoomState(
++                isEnabled = true,
++                defaultZoom = 110,
++                sites = mapOf("example.com" to 150),
++                privateSites = mapOf("example.org" to 80),
++            )
++
++        assertEquals(150, state.siteZoom("https://example.com/a", isPrivate = false))
++        assertEquals(110, state.siteZoom("https://example.org/a", isPrivate = false))
++        assertEquals(80, state.siteZoom("https://example.org/a", isPrivate = true))
++        // The zooms of the normal tabs don't apply to the private ones.
++        assertEquals(110, state.siteZoom("https://example.com/a", isPrivate = true))
++        assertEquals(100, state.siteZoom("about:home", isPrivate = false))
++    }
++
++    @Test
++    fun `WHEN the zoom of a site changes THEN it is remembered, unless it is the default one`() {
++        val state = PageZoomState(isEnabled = true, defaultZoom = 100)
++
++        val zoomed = state.withSiteZoom("https://example.com/a", isPrivate = false, zoom = 120)
++        assertEquals(mapOf("example.com" to 120), zoomed.sites)
++
++        val zoomedPrivately = zoomed.withSiteZoom("https://example.org/", isPrivate = true, zoom = 90)
++        assertEquals(mapOf("example.com" to 120), zoomedPrivately.sites)
++        assertEquals(mapOf("example.org" to 90), zoomedPrivately.privateSites)
++
++        val reset = zoomedPrivately.withSiteZoom("https://example.com/b", isPrivate = false, zoom = 100)
++        assertTrue(reset.sites.isEmpty())
++
++        assertEquals(state, state.withSiteZoom("about:home", isPrivate = false, zoom = 120))
++    }
++
++    @Test
++    fun `WHEN keys are pressed with Ctrl THEN they change the zoom like in Firefox for desktop`() {
++        assertEquals(PageZoomShortcut.ZOOM_IN, pageZoomShortcut(KeyEvent.KEYCODE_PLUS, CTRL))
++        // Ctrl and Shift and = is Ctrl and + on some layouts.
++        val ctrlShift = CTRL or KeyEvent.META_SHIFT_ON
++        assertEquals(PageZoomShortcut.ZOOM_IN, pageZoomShortcut(KeyEvent.KEYCODE_EQUALS, ctrlShift))
++        assertEquals(PageZoomShortcut.ZOOM_IN, pageZoomShortcut(KeyEvent.KEYCODE_NUMPAD_ADD, CTRL))
++        assertEquals(PageZoomShortcut.ZOOM_OUT, pageZoomShortcut(KeyEvent.KEYCODE_MINUS, CTRL))
++        assertEquals(PageZoomShortcut.ZOOM_OUT, pageZoomShortcut(KeyEvent.KEYCODE_NUMPAD_SUBTRACT, CTRL))
++        assertEquals(PageZoomShortcut.RESET, pageZoomShortcut(KeyEvent.KEYCODE_0, CTRL))
++        assertNull(pageZoomShortcut(KeyEvent.KEYCODE_PLUS, 0))
++        assertNull(pageZoomShortcut(KeyEvent.KEYCODE_PLUS, CTRL or KeyEvent.META_ALT_ON))
++        assertNull(pageZoomShortcut(KeyEvent.KEYCODE_1, CTRL))
++    }
++
++    @Test
++    fun `GIVEN the patch of the feature is applied THEN the feature zooms the pages`() {
++        assertTrue(PageZoomFeature in PatchFeatureHooks.all)
++    }
++}

@@ -15,3 +15,4 @@
 0010-new-tab-focus.patch                        | facoltativa  | Nuova scheda con la barra degli indirizzi attiva | New tab with the address bar focused
 0020-keyboard-shortcuts.patch                   | facoltativa  | Scorciatoie da tastiera fisica | Physical keyboard shortcuts
 0030-dropdown-menu.patch                        | facoltativa  | Menu a tendina sugli schermi grandi | Dropdown menu on large screens
+0040-page-zoom.patch                           | facoltativa  | Zoom delle pagine come su computer | Desktop-like page zoom

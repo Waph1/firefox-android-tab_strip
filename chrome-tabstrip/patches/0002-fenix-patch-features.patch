@@ -1,5 +1,5 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
-index 78266119..a3df1d98 100644
+index 78266119..8aaabfe3 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
 @@ -20,7 +20,9 @@ import android.text.format.DateUtils
@@ -20,7 +20,15 @@ index 78266119..a3df1d98 100644
  import org.mozilla.fenix.pbmlock.PrivateBrowsingLockFeature
  import org.mozilla.fenix.perf.DefaultStartupPathProvider
  import org.mozilla.fenix.perf.MarkersActivityLifecycleCallbacks
-@@ -1364,6 +1367,8 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -500,6 +503,7 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+         if (this !is ExternalAppBrowserActivity) {
+             immersiveTabStrip.start(supportFragmentManager)
+             SelfUpdater(this).start()
++            PatchFeatureHooks.all.forEach { it.onActivityCreated(this) }
+         }
+ 
+         // Checks if Activity is currently in PiP mode if launched from external intents, then exits it
+@@ -1364,6 +1368,8 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
      }
  
      override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -29,7 +37,7 @@ index 78266119..a3df1d98 100644
          // The KEYCODE_MENU event is handled here instead of onKeyDown or onKeyUp because
          // after navigating to another fragment like Settings or Bookmarks, and then back this
          // key event is somehow getting consumed before it reaches onKeyDown or onKeyUp.
-@@ -1391,6 +1396,15 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -1391,6 +1397,15 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
          return super.dispatchKeyEvent(event)
      }
  
@@ -420,6 +428,28 @@ index 2d14245b..8678bc46 100644
              ) {
                  val syncStore = components.backgroundServices.syncStore
                  val tabCollectionStorage = components.core.tabCollectionStorage
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/menu/compose/MainMenu.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/menu/compose/MainMenu.kt
+index 91dddf5d..0fe8128e 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/menu/compose/MainMenu.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/menu/compose/MainMenu.kt
+@@ -64,6 +64,7 @@ import org.mozilla.fenix.components.menu.MenuDialogTestTag.MORE_OPTION_CHEVRON
+ import org.mozilla.fenix.components.menu.compose.header.MozillaAccountMenuItem
+ import org.mozilla.fenix.components.menu.store.IPProtectionMenuState
+ import org.mozilla.fenix.components.menu.store.WebExtensionMenuItem
++import org.mozilla.fenix.patchfeatures.PatchFeatureHooks
+ import org.mozilla.fenix.theme.FirefoxTheme
+ 
+ /**
+@@ -236,6 +237,9 @@ fun MainMenu(
+             }
+         },
+     ) {
++        // The optional features of the patch can add items above the ones of Firefox.
++        PatchFeatureHooks.all.forEach { it.MainMenuItems(accessPoint) }
++
+         if (isReaderViewActive && accessPoint != MenuAccessPoint.Home) {
+             MenuGroup {
+                 MenuItem(
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt
 index 1312a62f..eb50448e 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt
@@ -442,10 +472,10 @@ index 1312a62f..eb50448e 100644
          }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
 new file mode 100644
-index 00000000..73423ad5
+index 00000000..27e261a3
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
-@@ -0,0 +1,227 @@
+@@ -0,0 +1,252 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -458,7 +488,9 @@ index 00000000..73423ad5
 +import android.view.KeyEvent
 +import android.view.KeyboardShortcutGroup
 +import android.view.KeyboardShortcutInfo
++import androidx.compose.runtime.Composable
 +import androidx.fragment.app.DialogFragment
++import androidx.preference.PreferenceFragmentCompat
 +import mozilla.components.compose.base.menu.MenuItem
 +import org.json.JSONArray
 +import org.json.JSONException
@@ -589,6 +621,14 @@ index 00000000..73423ad5
 + * whichever other optional patches are left out. Every method does nothing unless the feature overrides it.
 + */
 +interface PatchFeatureHooks {
++    /**
++     * Invoked when the main activity of Firefox is created (not for the tabs opened by other apps), e.g. to start the
++     * feature.
++     *
++     * @param activity The activity.
++     */
++    fun onActivityCreated(activity: HomeActivity) = Unit
++
 +    /** Items the feature adds to the menu of [tab] in the tab strip (long press, or right click). */
 +    fun tabStripMenuItems(tab: TabStripMenuTab): List<MenuItem> = emptyList()
 +
@@ -626,6 +666,21 @@ index 00000000..73423ad5
 +        fragment: DialogFragment,
 +        accessPoint: MenuAccessPoint,
 +    ): Dialog? = null
++
++    /**
++     * Items the feature adds at the top of the main menu, above the ones of Firefox.
++     *
++     * @param accessPoint Where the menu is opened from.
++     */
++    @Composable
++    fun MainMenuItems(accessPoint: MenuAccessPoint) = Unit
++
++    /**
++     * Adds the preferences of the feature to Settings → Customize, after the ones of Firefox.
++     *
++     * @param fragment The fragment of the settings, see [PreferenceFragmentCompat.getPreferenceScreen].
++     */
++    fun addCustomizationPreferences(fragment: PreferenceFragmentCompat) = Unit
 +
 +    companion object {
 +        /** The entry points of the optional features included in this build. */
@@ -860,6 +915,26 @@ index 878e7d62..3ca1758d 100644
      private fun downloadAndInstall(update: SelfUpdateInfo) {
          val progressBar =
              ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply {
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
+index 6e10cbf3..ce3922ad 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
+@@ -36,6 +36,7 @@ import org.mozilla.fenix.ext.isTallWindow
+ import org.mozilla.fenix.ext.isWideWindow
+ import org.mozilla.fenix.ext.requireComponents
+ import org.mozilla.fenix.ext.showToolbar
++import org.mozilla.fenix.patchfeatures.PatchFeatureHooks
+ import org.mozilla.fenix.settings.settingssearch.PreferenceFileInformation.CustomizationPreferences
+ import org.mozilla.fenix.settings.settingssearch.SettingsSearchItem
+ import org.mozilla.fenix.settings.settingssearch.SettingsSearchProvider
+@@ -67,6 +68,7 @@ class CustomizationFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFrag
+         setPreferencesFromResource(R.xml.customization_preferences, rootKey)
+ 
+         setupPreferences(dynamicFeaturesStatus)
++        PatchFeatureHooks.all.forEach { it.addCustomizationPreferences(this) }
+     }
+ 
+     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutFragment.kt
 index 53cfe207..4ddc0057 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutFragment.kt
