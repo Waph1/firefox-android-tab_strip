@@ -246,6 +246,14 @@ sono elencate in **Impostazioni → Informazioni su Firefox → Funzioni della p
     **Ctrl+Shift+B**, che cambia la stessa impostazione.
   - Ctrl+D e la stellina salvano i segnalibri in «Segnalibri mobile», come sempre: per metterli nella barra,
     Modifica → cartella «Barra dei segnalibri».
+- **Mouse e trackpad** (`0060`) sulla tab strip, come in Chrome:
+  - **clic centrale** su una scheda: la chiude;
+  - **clic destro** su una scheda: apre il suo menu (lo stesso della pressione prolungata), senza selezionarla;
+  - **rotella** (anche quella verticale) o scorrimento del trackpad: fa scorrere le schede;
+  - tenendo il mouse fermo su una scheda compare un **suggerimento** con il titolo completo e il sito.
+
+  Le schede e il pulsante di chiusura si evidenziano già sotto il mouse in Firefox. Per la barra dei segnalibri
+  (clic centrale, Ctrl+clic, clic destro) vedi la funzione `0050`.
 
 ## Versione di Firefox
 
@@ -461,6 +469,8 @@ menu in un'altra finestra, `PatchFeatureHooks.menuDialog`: in quel caso niente m
 delle funzioni facoltative in cima al menu, `PatchFeatureHooks.MainMenuItems`), `CustomizationFragment.kt`
 (preferenze delle funzioni facoltative in Impostazioni → Personalizza, `PatchFeatureHooks.addCustomizationPreferences`);
 in `HomeActivity.kt` anche l'avvio delle funzioni facoltative (`PatchFeatureHooks.onActivityCreated`).
+`ChromeStyleTabStrip.kt` (della `0001`) lascia aggiungere qualcosa a ogni scheda (`PatchFeatureHooks.TabStripTab`, con
+le azioni chiudi e mostra il menu) e alla lista delle schede (`PatchFeatureHooks.tabStripModifier`).
 `BrowserToolbarComposable.kt` e `HomeToolbarComposable.kt` mostrano accanto alla barra degli indirizzi le righe delle
 funzioni facoltative (`PatchFeatureHooks.AddressBarRow`), `ext/Fragment.kt` ne conta l'altezza nello spazio che le
 pagine lasciano alle barre (`PatchFeatureHooks.addressBarRowHeight`) e `BaseBrowserFragment.kt` lo ricalcola quando
@@ -499,6 +509,12 @@ Solo file nuovi: `patchfeatures/BookmarksBar.kt` (cosa mostrare, quanti segnalib
 `BookmarksBarFeature.kt` (lettura della cartella «Barra dei segnalibri» di Places e aggiornamento dopo ogni
 sincronizzazione, apertura dei segnalibri come fa la home, impostazione), `res/values/` e
 `res/values-it/bookmarks_bar_strings.xml`, `test/.../BookmarksBarTest.kt`.
+
+### `0060`: mouse e trackpad (facoltativa)
+
+Solo file nuovi: `patchfeatures/Mouse.kt` (scorrimento con la rotella, posizione del suggerimento, sito della scheda),
+`MouseFeature.kt` (clic centrale e destro e suggerimento sulle schede, rotella sulla tab strip),
+`test/.../MouseTest.kt`.
 
 ## Differenze rispetto a Chrome
 
