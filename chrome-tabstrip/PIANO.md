@@ -20,7 +20,7 @@ schermo grande" compare e sparisce **al volo** aprendo e chiudendo il telefono, 
 | 2  | Scorciatoie da tastiera fisica                    | `0020-keyboard-shortcuts`    | facoltativa | fatto        |
 | 3  | Menu ⋮ a tendina                                  | `0030-dropdown-menu`         | facoltativa | fatto        |
 | 4  | Zoom della pagina come su desktop                 | `0040-page-zoom`             | facoltativa | fatto        |
-| 5  | Barra dei segnalibri                              | `0050-bookmarks-bar`         | facoltativa | da fare      |
+| 5  | Barra dei segnalibri                              | `0050-bookmarks-bar`         | facoltativa | fatto        |
 | 6  | Mouse e trackpad                                  | `0060-mouse`                 | facoltativa | da fare      |
 | 7  | Icona audio sulle schede                          | `0070-tab-audio`             | facoltativa | da fare      |
 | 8  | Gruppi di schede nella tab strip                  | `0080-tab-groups`            | facoltativa | da fare      |
@@ -236,6 +236,12 @@ Sync: la barra mostra quella, quindi è la stessa del PC.
 
 Salvataggio: Ctrl+D e la stellina salvano in «Segnalibri mobile» come upstream; con **Modifica** si sceglie la
 cartella «Barra dei segnalibri» (già possibile upstream).
+
+**Fatto**, con i nuovi punti di aggancio `AddressBarRow` e `addressBarRowHeight` della `0002` (la riga accanto alla
+barra degli indirizzi e lo spazio che le pagine le lasciano). In più rispetto al piano: i separatori della cartella
+compaiono come righe verticali (e come linee nei menu). Il menu con la pressione lunga c'è per i segnalibri della
+barra, non per quelli dentro i menu delle cartelle né per le cartelle; la barra è visibile anche mentre si scrive
+nella barra degli indirizzi (ad es. nella nuova scheda), come sul desktop.
 
 ---
 

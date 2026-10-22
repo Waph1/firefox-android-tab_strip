@@ -231,6 +231,21 @@ sono elencate in **Impostazioni → Informazioni su Firefox → Funzioni della p
   GeckoView non offre lo zoom delle pagine di Firefox per computer: lo applica un'estensione interna e invisibile
   (la proprietà CSS `zoom`), quindi il PDF, la modalità lettura e le pagine interne di Firefox non si ingrandiscono, e
   su qualche sito particolare (editor, mappe) possono esserci piccoli difetti: basta rimettere quel sito al 100%.
+- **Barra dei segnalibri** (`0050`), **solo a schermo grande**: una riga accanto alla barra degli indirizzi (sotto
+  se la barra è in alto, sopra se è in basso), sulle pagine e nella home, con i segnalibri della cartella **«Barra
+  dei segnalibri»**, quella della barra dei segnalibri di Firefox per computer: con Sync è la stessa del PC.
+  - Ogni segnalibro mostra l'icona del sito e il titolo; le cartelle si aprono a tendina (le sottocartelle di
+    fianco), i separatori sono righe verticali e i segnalibri che non ci stanno finiscono nel pulsante **»**.
+  - Tocco o clic: apre il segnalibro nella scheda corrente (dalla home, come i segnalibri della home); **Ctrl+clic**
+    o **clic centrale**: in una nuova scheda in background.
+  - **Pressione prolungata** o **clic destro** su un segnalibro della barra: Apri in nuova scheda, Apri in scheda
+    privata, Modifica (l'editor dei segnalibri di Firefox, dove si può anche cambiare cartella), Elimina.
+  - Scorrendo la pagina si nasconde insieme alla barra degli indirizzi; rilegge i segnalibri quando compare e dopo
+    ogni sincronizzazione. Se la cartella è vuota, la barra spiega come riempirla.
+  - Si mostra e si nasconde in Impostazioni → Personalizza → «Barra dei segnalibri (schermo grande)» o con
+    **Ctrl+Shift+B**, che cambia la stessa impostazione.
+  - Ctrl+D e la stellina salvano i segnalibri in «Segnalibri mobile», come sempre: per metterli nella barra,
+    Modifica → cartella «Barra dei segnalibri».
 
 ## Versione di Firefox
 
@@ -446,6 +461,10 @@ menu in un'altra finestra, `PatchFeatureHooks.menuDialog`: in quel caso niente m
 delle funzioni facoltative in cima al menu, `PatchFeatureHooks.MainMenuItems`), `CustomizationFragment.kt`
 (preferenze delle funzioni facoltative in Impostazioni → Personalizza, `PatchFeatureHooks.addCustomizationPreferences`);
 in `HomeActivity.kt` anche l'avvio delle funzioni facoltative (`PatchFeatureHooks.onActivityCreated`).
+`BrowserToolbarComposable.kt` e `HomeToolbarComposable.kt` mostrano accanto alla barra degli indirizzi le righe delle
+funzioni facoltative (`PatchFeatureHooks.AddressBarRow`), `ext/Fragment.kt` ne conta l'altezza nello spazio che le
+pagine lasciano alle barre (`PatchFeatureHooks.addressBarRowHeight`) e `BaseBrowserFragment.kt` lo ricalcola quando
+cambia (`PatchFeatureHooks.onAddressBarRowsChanged`).
 
 ### `0010`: nuova scheda con la barra degli indirizzi attiva (facoltativa)
 
@@ -472,6 +491,14 @@ zoom dall'app e li manda alle pagine, lo script delle pagine applica `zoom` all'
 `patchfeatures/PageZoom.kt` (livelli, zoom per sito, scorciatoie), `PageZoomFeature.kt` (installazione
 dell'estensione, impostazioni salvate, riga del menu, preferenze, Ctrl + / − / 0), `res/values/` e
 `res/values-it/page_zoom_strings.xml`, `test/.../PageZoomTest.kt`.
+
+### `0050`: barra dei segnalibri (facoltativa)
+
+Solo file nuovi: `patchfeatures/BookmarksBar.kt` (cosa mostrare, quanti segnalibri entrano, Ctrl+Shift+B),
+`BookmarksBarContent.kt` (la barra, i menu delle cartelle e del pulsante », il menu del segnalibro, i clic del mouse),
+`BookmarksBarFeature.kt` (lettura della cartella «Barra dei segnalibri» di Places e aggiornamento dopo ogni
+sincronizzazione, apertura dei segnalibri come fa la home, impostazione), `res/values/` e
+`res/values-it/bookmarks_bar_strings.xml`, `test/.../BookmarksBarTest.kt`.
 
 ## Differenze rispetto a Chrome
 

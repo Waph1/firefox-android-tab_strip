@@ -1,0 +1,998 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBar.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBar.kt
+new file mode 100644
+index 00000000..712a963d
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBar.kt
+@@ -0,0 +1,84 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import android.view.KeyEvent
++import mozilla.components.concept.storage.BookmarkNode
++import mozilla.components.concept.storage.BookmarkNodeType
++
++/** The height of the bookmarks toolbar, in dp. */
++internal const val BOOKMARKS_BAR_HEIGHT_DP = 40
++
++/** How a bookmark of the bookmarks toolbar is opened. */
++internal enum class BookmarkOpening {
++    /** In the current tab (a tap or a click); from the homepage, like the bookmarks of the homepage. */
++    CURRENT_TAB,
++
++    /** In a new tab, which is shown (menu of the bookmark). */
++    NEW_TAB,
++
++    /** In a new tab left in the background (Ctrl and click, or middle click), like in Firefox for desktop. */
++    BACKGROUND_TAB,
++
++    /** In a new private tab, which is shown (menu of the bookmark). */
++    PRIVATE_TAB,
++}
++
++/**
++ * The bookmarks, folders and separators that the bookmarks toolbar (or one of its menus) shows from [folder], in
++ * order: the bookmarks without an address are left out.
++ */
++internal fun bookmarksBarItems(folder: BookmarkNode?): List<BookmarkNode> =
++    folder?.children.orEmpty().filter { it.type != BookmarkNodeType.ITEM || !it.url.isNullOrBlank() }
++
++/** The text that names [bookmark]: its title, or its address if it has no title. */
++internal fun bookmarkLabel(bookmark: BookmarkNode): String =
++    bookmark.title?.takeIf { it.isNotBlank() } ?: bookmark.url.orEmpty()
++
++/**
++ * Returns how many items of the bookmarks toolbar fit in it, from the first one: when they don't all fit, the » button
++ * takes room at the end and shows the others.
++ *
++ * @param itemWidths The width of each item.
++ * @param availableWidth The width of the bookmarks toolbar.
++ * @param overflowButtonWidth The width of the » button.
++ * @param spacing The space between two items, and between the last one and the » button.
++ */
++internal fun visibleBookmarksCount(
++    itemWidths: List<Int>,
++    availableWidth: Int,
++    overflowButtonWidth: Int,
++    spacing: Int,
++): Int {
++    val totalWidth = itemWidths.sum() + spacing * (itemWidths.size - 1).coerceAtLeast(0)
++    if (totalWidth <= availableWidth) return itemWidths.size
++
++    val room = availableWidth - overflowButtonWidth - spacing
++    var usedWidth = 0
++    var count = 0
++    for (width in itemWidths) {
++        val newWidth = usedWidth + width + if (count > 0) spacing else 0
++        if (newWidth > room) break
++        usedWidth = newWidth
++        count++
++    }
++    return count
++}
++
++/**
++ * Whether a key pressed with the given modifiers is Ctrl+Shift+B, which shows or hides the bookmarks toolbar like in
++ * Firefox for desktop.
++ *
++ * @param keyCode The key, see [KeyEvent.getKeyCode].
++ * @param metaState The modifiers, see [KeyEvent.getMetaState].
++ */
++internal fun isBookmarksBarShortcut(
++    keyCode: Int,
++    metaState: Int,
++): Boolean {
++    val modifiers = KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON or KeyEvent.META_ALT_ON or KeyEvent.META_META_ON
++    return keyCode == KeyEvent.KEYCODE_B &&
++        (metaState and modifiers) == (KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON)
++}
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarContent.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarContent.kt
+new file mode 100644
+index 00000000..b18813a1
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarContent.kt
+@@ -0,0 +1,494 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import androidx.compose.foundation.background
++import androidx.compose.foundation.clickable
++import androidx.compose.foundation.combinedClickable
++import androidx.compose.foundation.gestures.awaitEachGesture
++import androidx.compose.foundation.gestures.waitForUpOrCancellation
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.fillMaxSize
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.height
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.size
++import androidx.compose.foundation.layout.width
++import androidx.compose.foundation.layout.widthIn
++import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.material3.DropdownMenu
++import androidx.compose.material3.DropdownMenuItem
++import androidx.compose.material3.HorizontalDivider
++import androidx.compose.material3.Icon
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.Text
++import androidx.compose.material3.VerticalDivider
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableIntStateOf
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.rememberUpdatedState
++import androidx.compose.runtime.setValue
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.draw.clip
++import androidx.compose.ui.input.pointer.PointerEventPass
++import androidx.compose.ui.input.pointer.PointerEventType
++import androidx.compose.ui.input.pointer.PointerInputScope
++import androidx.compose.ui.input.pointer.isCtrlPressed
++import androidx.compose.ui.input.pointer.isSecondaryPressed
++import androidx.compose.ui.input.pointer.isTertiaryPressed
++import androidx.compose.ui.input.pointer.pointerInput
++import androidx.compose.ui.layout.SubcomposeLayout
++import androidx.compose.ui.layout.onSizeChanged
++import androidx.compose.ui.platform.LocalDensity
++import androidx.compose.ui.res.painterResource
++import androidx.compose.ui.res.stringResource
++import androidx.compose.ui.semantics.contentDescription
++import androidx.compose.ui.semantics.semantics
++import androidx.compose.ui.text.style.TextOverflow
++import androidx.compose.ui.unit.Constraints
++import androidx.compose.ui.unit.DpOffset
++import androidx.compose.ui.unit.dp
++import mozilla.components.compose.base.menu.DropdownMenu as AcornDropdownMenu
++import mozilla.components.compose.base.menu.MenuItem
++import mozilla.components.compose.base.text.Text
++import mozilla.components.concept.storage.BookmarkNode
++import mozilla.components.concept.storage.BookmarkNodeType
++import mozilla.components.ui.icons.R as iconsR
++import org.mozilla.fenix.R
++import org.mozilla.fenix.compose.Favicon
++import org.mozilla.fenix.theme.FirefoxTheme
++
++private val ItemHeight = 32.dp
++private val ItemMaxWidth = 180.dp
++private val ItemSpacing = 2.dp
++private val ItemShape = RoundedCornerShape(8.dp)
++private val OverflowButtonWidth = 40.dp
++private val IconSize = 16.dp
++private val MenuMaxWidth = 320.dp
++
++/** The slot of the » button in the layout of the bookmarks toolbar (the other slots are the guids of the items). */
++private object OverflowButtonSlot
++
++/**
++ * What the bookmarks toolbar does with the bookmarks.
++ *
++ * @property onOpen Opens a bookmark.
++ * @property onEdit Opens the bookmark editor of Firefox for a bookmark.
++ * @property onDelete Deletes a bookmark.
++ */
++internal data class BookmarksBarActions(
++    val onOpen: (BookmarkNode, BookmarkOpening) -> Unit,
++    val onEdit: (BookmarkNode) -> Unit,
++    val onDelete: (BookmarkNode) -> Unit,
++)
++
++/**
++ * The bookmarks toolbar: the bookmarks, folders and separators of [folder] in a row, with a » menu for the ones that
++ * don't fit, or a hint when the folder is empty. It's [BOOKMARKS_BAR_HEIGHT_DP] high.
++ *
++ * @param folder The "Bookmarks Toolbar" folder with all its bookmarks, or `null` while it's read.
++ * @param isPrivate Whether the browser is in private mode (for the icons of the sites).
++ * @param actions What the bookmarks toolbar does with the bookmarks.
++ */
++@Composable
++internal fun BookmarksBar(
++    folder: BookmarkNode?,
++    isPrivate: Boolean,
++    actions: BookmarksBarActions,
++) {
++    Box(
++        modifier =
++            Modifier.fillMaxWidth()
++                .height(BOOKMARKS_BAR_HEIGHT_DP.dp)
++                .background(MaterialTheme.colorScheme.surface)
++                .padding(horizontal = 8.dp),
++        contentAlignment = Alignment.CenterStart,
++    ) {
++        val items = bookmarksBarItems(folder)
++        when {
++            folder == null -> Unit
++            items.isEmpty() ->
++                Text(
++                    text = stringResource(R.string.bookmarks_bar_empty),
++                    modifier = Modifier.padding(horizontal = 8.dp),
++                    color = MaterialTheme.colorScheme.onSurfaceVariant,
++                    maxLines = 1,
++                    overflow = TextOverflow.Ellipsis,
++                    style = FirefoxTheme.typography.caption,
++                )
++            else -> BookmarksBarItems(items = items, isPrivate = isPrivate, actions = actions)
++        }
++    }
++}
++
++/** The items of the bookmarks toolbar that fit, from the first one, and the » button with the others. */
++@Composable
++private fun BookmarksBarItems(
++    items: List<BookmarkNode>,
++    isPrivate: Boolean,
++    actions: BookmarksBarActions,
++) {
++    SubcomposeLayout(modifier = Modifier.fillMaxSize()) { constraints ->
++        val height = constraints.maxHeight
++        val itemConstraints = Constraints(maxWidth = ItemMaxWidth.roundToPx(), maxHeight = height)
++        val placeables =
++            items.map { item ->
++                subcompose(item.guid) { BookmarksBarItem(item, isPrivate, actions) }.first().measure(itemConstraints)
++            }
++        val spacing = ItemSpacing.roundToPx()
++        val overflowButtonWidth = OverflowButtonWidth.roundToPx()
++        val count =
++            visibleBookmarksCount(placeables.map { it.width }, constraints.maxWidth, overflowButtonWidth, spacing)
++        val overflowButton =
++            if (count < items.size) {
++                subcompose(OverflowButtonSlot) { OverflowButton(items.drop(count), isPrivate, actions) }
++                    .first()
++                    .measure(Constraints.fixed(overflowButtonWidth, ItemHeight.roundToPx()))
++            } else {
++                null
++            }
++
++        layout(constraints.maxWidth, height) {
++            var x = 0
++            placeables.take(count).forEach {
++                it.placeRelative(x, (height - it.height) / 2)
++                x += it.width + spacing
++            }
++            overflowButton?.let { it.placeRelative(constraints.maxWidth - it.width, (height - it.height) / 2) }
++        }
++    }
++}
++
++/** A bookmark, folder or separator of the bookmarks toolbar. */
++@Composable
++private fun BookmarksBarItem(
++    item: BookmarkNode,
++    isPrivate: Boolean,
++    actions: BookmarksBarActions,
++) {
++    when (item.type) {
++        BookmarkNodeType.SEPARATOR ->
++            Box(
++                modifier = Modifier.height(ItemHeight).padding(horizontal = 4.dp),
++                contentAlignment = Alignment.Center,
++            ) {
++                VerticalDivider(
++                    modifier = Modifier.height(IconSize + 4.dp),
++                    color = MaterialTheme.colorScheme.outlineVariant,
++                )
++            }
++
++        BookmarkNodeType.FOLDER -> {
++            var isMenuShown by remember { mutableStateOf(false) }
++            Box {
++                BookmarkButton(
++                    title = item.title.orEmpty(),
++                    icon = { FolderIcon() },
++                    onClick = { isMenuShown = true },
++                )
++                BookmarksMenu(
++                    items = bookmarksBarItems(item),
++                    expanded = isMenuShown,
++                    isPrivate = isPrivate,
++                    actions = actions,
++                    onDismissRequest = { isMenuShown = false },
++                    onBookmarkOpened = { isMenuShown = false },
++                )
++            }
++        }
++
++        BookmarkNodeType.ITEM -> {
++            var isMenuShown by remember { mutableStateOf(false) }
++            Box {
++                BookmarkButton(
++                    title = item.title.orEmpty(),
++                    description = bookmarkLabel(item),
++                    icon = { Favicon(url = item.url.orEmpty(), size = IconSize, isPrivate = isPrivate) },
++                    onClick = { isCtrlPressed ->
++                        val opening = if (isCtrlPressed) BookmarkOpening.BACKGROUND_TAB else BookmarkOpening.CURRENT_TAB
++                        actions.onOpen(item, opening)
++                    },
++                    onMiddleClick = { actions.onOpen(item, BookmarkOpening.BACKGROUND_TAB) },
++                    onContextMenu = { isMenuShown = true },
++                )
++                AcornDropdownMenu(
++                    menuItems =
++                        listOf(
++                            MenuItem.TextItem(text = Text.Resource(R.string.bookmarks_bar_open_in_new_tab)) {
++                                actions.onOpen(item, BookmarkOpening.NEW_TAB)
++                            },
++                            MenuItem.TextItem(text = Text.Resource(R.string.bookmarks_bar_open_in_private_tab)) {
++                                actions.onOpen(item, BookmarkOpening.PRIVATE_TAB)
++                            },
++                            MenuItem.TextItem(text = Text.Resource(R.string.bookmarks_bar_edit)) {
++                                actions.onEdit(item)
++                            },
++                            MenuItem.TextItem(
++                                text = Text.Resource(R.string.bookmarks_bar_delete),
++                                level = MenuItem.FixedItem.Level.Critical,
++                            ) {
++                                actions.onDelete(item)
++                            },
++                        ),
++                    expanded = isMenuShown,
++                    onDismissRequest = { isMenuShown = false },
++                )
++            }
++        }
++    }
++}
++
++/**
++ * A bookmark or a folder in the bookmarks toolbar: its icon and its title, if it has one (like on the desktop, a
++ * bookmark without title shows only the icon of the site).
++ *
++ * @param title The title of the bookmark or folder.
++ * @param icon The icon of the site, or of the folder.
++ * @param onClick Invoked when it's tapped or clicked, with whether Ctrl was pressed.
++ * @param description What the screen readers say for a bookmark without title.
++ * @param onMiddleClick Invoked when it's clicked with the middle button of the mouse.
++ * @param onContextMenu Invoked to show its menu, with a long press or a right click.
++ */
++@Composable
++private fun BookmarkButton(
++    title: String,
++    icon: @Composable () -> Unit,
++    onClick: (isCtrlPressed: Boolean) -> Unit,
++    description: String = title,
++    onMiddleClick: (() -> Unit)? = null,
++    onContextMenu: (() -> Unit)? = null,
++) {
++    val press = remember { BookmarkPress() }
++    val currentOnMiddleClick by rememberUpdatedState(onMiddleClick)
++    val currentOnContextMenu by rememberUpdatedState(onContextMenu)
++    Row(
++        modifier =
++            Modifier.height(ItemHeight)
++                .widthIn(max = ItemMaxWidth)
++                .clip(ItemShape)
++                .pointerInput(press) {
++                    detectMouseClicks(
++                        press = press,
++                        onMiddleClick = { currentOnMiddleClick?.invoke() },
++                        onRightClick = { currentOnContextMenu?.invoke() },
++                    )
++                }
++                .combinedClickable(onClick = { onClick(press.isCtrlPressed) }, onLongClick = onContextMenu)
++                .semantics { if (title.isEmpty()) contentDescription = description }
++                .padding(horizontal = 8.dp),
++        verticalAlignment = Alignment.CenterVertically,
++    ) {
++        icon()
++        if (title.isNotEmpty()) {
++            Spacer(modifier = Modifier.width(8.dp))
++            Text(
++                text = title,
++                color = MaterialTheme.colorScheme.onSurface,
++                maxLines = 1,
++                overflow = TextOverflow.Ellipsis,
++                style = FirefoxTheme.typography.body2,
++            )
++        }
++    }
++}
++
++/** The » button of the bookmarks toolbar, with the menu of the [items] that don't fit in it. */
++@Composable
++private fun OverflowButton(
++    items: List<BookmarkNode>,
++    isPrivate: Boolean,
++    actions: BookmarksBarActions,
++) {
++    var isMenuShown by remember { mutableStateOf(false) }
++    val description = stringResource(R.string.bookmarks_bar_more)
++    Box(
++        modifier =
++            Modifier.size(OverflowButtonWidth, ItemHeight)
++                .clip(ItemShape)
++                .clickable { isMenuShown = true }
++                .semantics { contentDescription = description },
++        contentAlignment = Alignment.Center,
++    ) {
++        Text(text = "»", color = MaterialTheme.colorScheme.onSurface, style = FirefoxTheme.typography.headline7)
++        BookmarksMenu(
++            items = items,
++            expanded = isMenuShown,
++            isPrivate = isPrivate,
++            actions = actions,
++            onDismissRequest = { isMenuShown = false },
++            onBookmarkOpened = { isMenuShown = false },
++        )
++    }
++}
++
++/**
++ * The menu of a folder (or of the » button) with its [items]: its subfolders open in menus next to it.
++ *
++ * @param items The bookmarks, folders and separators of the menu.
++ * @param expanded Whether the menu is shown.
++ * @param isPrivate Whether the browser is in private mode (for the icons of the sites).
++ * @param actions What the bookmarks toolbar does with the bookmarks.
++ * @param onDismissRequest Invoked to close the menu.
++ * @param onBookmarkOpened Invoked when a bookmark is opened from the menu or a submenu, to close all of them.
++ * @param offset Where the menu is shown, from the bottom of its anchor.
++ */
++@Composable
++private fun BookmarksMenu(
++    items: List<BookmarkNode>,
++    expanded: Boolean,
++    isPrivate: Boolean,
++    actions: BookmarksBarActions,
++    onDismissRequest: () -> Unit,
++    onBookmarkOpened: () -> Unit,
++    offset: DpOffset = DpOffset(0.dp, 0.dp),
++) {
++    DropdownMenu(
++        expanded = expanded,
++        onDismissRequest = onDismissRequest,
++        modifier = Modifier.widthIn(max = MenuMaxWidth),
++        offset = offset,
++        shape = MaterialTheme.shapes.large,
++        containerColor = MaterialTheme.colorScheme.surfaceBright,
++    ) {
++        if (items.isEmpty()) {
++            DropdownMenuItem(
++                text = { MenuText(stringResource(R.string.bookmarks_bar_empty_folder)) },
++                onClick = {},
++                enabled = false,
++            )
++        }
++        items.forEach { item ->
++            when (item.type) {
++                BookmarkNodeType.SEPARATOR -> HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
++                BookmarkNodeType.FOLDER -> BookmarksSubmenu(item, isPrivate, actions, onBookmarkOpened)
++                BookmarkNodeType.ITEM -> BookmarksMenuItem(item, isPrivate, actions, onBookmarkOpened)
++            }
++        }
++    }
++}
++
++/** A folder in a menu of the bookmarks toolbar, which opens its menu next to it. */
++@Composable
++private fun BookmarksSubmenu(
++    folder: BookmarkNode,
++    isPrivate: Boolean,
++    actions: BookmarksBarActions,
++    onBookmarkOpened: () -> Unit,
++) {
++    var isMenuShown by remember { mutableStateOf(false) }
++    var width by remember { mutableIntStateOf(0) }
++    var height by remember { mutableIntStateOf(0) }
++    val density = LocalDensity.current
++    Box(
++        modifier =
++            Modifier.onSizeChanged {
++                width = it.width
++                height = it.height
++            },
++    ) {
++        DropdownMenuItem(
++            text = { MenuText(folder.title.orEmpty()) },
++            onClick = { isMenuShown = true },
++            leadingIcon = { FolderIcon() },
++            trailingIcon = {
++                Icon(painter = painterResource(iconsR.drawable.mozac_ic_chevron_right_16), contentDescription = null)
++            },
++        )
++        BookmarksMenu(
++            items = bookmarksBarItems(folder),
++            expanded = isMenuShown,
++            isPrivate = isPrivate,
++            actions = actions,
++            onDismissRequest = { isMenuShown = false },
++            onBookmarkOpened = onBookmarkOpened,
++            // Next to the folder, like the menus of the desktop.
++            offset = with(density) { DpOffset(width.toDp(), -height.toDp()) },
++        )
++    }
++}
++
++/** A bookmark in a menu of the bookmarks toolbar. */
++@Composable
++private fun BookmarksMenuItem(
++    bookmark: BookmarkNode,
++    isPrivate: Boolean,
++    actions: BookmarksBarActions,
++    onBookmarkOpened: () -> Unit,
++) {
++    val press = remember { BookmarkPress() }
++    val currentBookmark by rememberUpdatedState(bookmark)
++    val currentActions by rememberUpdatedState(actions)
++    val currentOnBookmarkOpened by rememberUpdatedState(onBookmarkOpened)
++    val open = { opening: BookmarkOpening ->
++        currentOnBookmarkOpened()
++        currentActions.onOpen(currentBookmark, opening)
++    }
++    DropdownMenuItem(
++        text = { MenuText(bookmarkLabel(bookmark)) },
++        onClick = {
++            open(if (press.isCtrlPressed) BookmarkOpening.BACKGROUND_TAB else BookmarkOpening.CURRENT_TAB)
++        },
++        modifier =
++            Modifier.pointerInput(press) {
++                detectMouseClicks(
++                    press = press,
++                    onMiddleClick = { open(BookmarkOpening.BACKGROUND_TAB) },
++                    onRightClick = {},
++                )
++            },
++        leadingIcon = { Favicon(url = bookmark.url.orEmpty(), size = IconSize, isPrivate = isPrivate) },
++    )
++}
++
++@Composable
++private fun MenuText(text: String) {
++    Text(text = text, maxLines = 1, overflow = TextOverflow.Ellipsis, style = FirefoxTheme.typography.subtitle1)
++}
++
++@Composable
++private fun FolderIcon() {
++    Icon(
++        painter = painterResource(iconsR.drawable.mozac_ic_folder_24),
++        contentDescription = null,
++        modifier = Modifier.size(IconSize),
++        tint = MaterialTheme.colorScheme.onSurface,
++    )
++}
++
++/** Whether Ctrl was pressed with the last press on a bookmark, read when the bookmark is clicked. */
++private class BookmarkPress {
++    var isCtrlPressed = false
++}
++
++/**
++ * Handles the clicks with the middle and the right button of a mouse, before the other gestures (which don't get
++ * them), and remembers in [press] whether Ctrl is pressed with the other presses.
++ */
++private suspend fun PointerInputScope.detectMouseClicks(
++    press: BookmarkPress,
++    onMiddleClick: () -> Unit,
++    onRightClick: () -> Unit,
++) {
++    awaitEachGesture {
++        val down = awaitPointerEvent(PointerEventPass.Initial)
++        if (down.type != PointerEventType.Press) return@awaitEachGesture
++        press.isCtrlPressed = down.keyboardModifiers.isCtrlPressed
++        val onClick =
++            when {
++                down.buttons.isTertiaryPressed -> onMiddleClick
++                down.buttons.isSecondaryPressed -> onRightClick
++                else -> return@awaitEachGesture
++            }
++        down.changes.forEach { it.consume() }
++        val up = waitForUpOrCancellation(PointerEventPass.Initial) ?: return@awaitEachGesture
++        up.consume()
++        onClick()
++    }
++}
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarFeature.kt
+new file mode 100644
+index 00000000..a9fe50c8
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarFeature.kt
+@@ -0,0 +1,257 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import android.content.Context
++import android.content.SharedPreferences
++import android.view.KeyEvent
++import android.view.KeyboardShortcutInfo
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.LaunchedEffect
++import androidx.compose.runtime.collectAsState
++import androidx.compose.runtime.getValue
++import androidx.compose.ui.platform.LocalContext
++import androidx.core.content.edit
++import androidx.lifecycle.Lifecycle
++import androidx.lifecycle.compose.LocalLifecycleOwner
++import androidx.lifecycle.lifecycleScope
++import androidx.lifecycle.repeatOnLifecycle
++import androidx.navigation.findNavController
++import androidx.preference.PreferenceCategory
++import androidx.preference.PreferenceFragmentCompat
++import androidx.preference.SwitchPreferenceCompat
++import kotlinx.coroutines.MainScope
++import kotlinx.coroutines.channels.BufferOverflow
++import kotlinx.coroutines.flow.MutableSharedFlow
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.collectLatest
++import kotlinx.coroutines.flow.onStart
++import kotlinx.coroutines.launch
++import mozilla.appservices.places.BookmarkRoot
++import mozilla.components.concept.engine.EngineSession.LoadUrlFlags
++import mozilla.components.concept.engine.EngineSession.LoadUrlFlags.Companion.ALLOW_JAVASCRIPT_URL
++import mozilla.components.concept.storage.BookmarkNode
++import mozilla.components.lib.state.ext.observeAsComposableState
++import mozilla.components.service.fxa.sync.SyncStatusObserver
++import org.mozilla.fenix.BrowserDirection
++import org.mozilla.fenix.HomeActivity
++import org.mozilla.fenix.NavGraphDirections
++import org.mozilla.fenix.R
++import org.mozilla.fenix.browser.tabstrip.AdaptiveTabStrip
++import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchEnded
++import org.mozilla.fenix.ext.components
++import kotlin.math.roundToInt
++
++private const val PREFERENCES_NAME = "chrome_tabstrip_bookmarks_bar"
++private const val PREF_IS_SHOWN = "is_shown"
++
++/**
++ * Optional feature "bookmarks toolbar" (`0050-bookmarks-bar.patch`): on large screens (the ones showing the tab strip)
++ * a row next to the address bar of the pages and of the homepage shows the bookmarks of the "Bookmarks Toolbar"
++ * folder, the one of the bookmarks toolbar of Firefox for desktop (synced with Sync), like on the desktop: the folders
++ * open in menus, and the bookmarks that don't fit go in a » menu.
++ *
++ * A bookmark opens in the current tab, or in a new tab in the background with Ctrl or the middle button of the mouse;
++ * a long press (or a right click) shows its menu. The bookmarks toolbar is shown or hidden in Settings → Customize, or
++ * with Ctrl+Shift+B. It reads the bookmarks again when it's shown and after each sync.
++ */
++object BookmarksBarFeature : PatchFeatureHooks {
++    private val scope = MainScope()
++
++    /** Whether the user shows the bookmarks toolbar (the default), read once the feature starts. */
++    private val isBarShown = MutableStateFlow(false)
++
++    /** The "Bookmarks Toolbar" folder with all its bookmarks, or `null` until it's read. */
++    private val toolbarFolder = MutableStateFlow<BookmarkNode?>(null)
++    private val refreshRequests = MutableSharedFlow<Unit>(
++        extraBufferCapacity = 1,
++        onBufferOverflow = BufferOverflow.DROP_OLDEST,
++    )
++    private var preferences: SharedPreferences? = null
++
++    override fun onActivityCreated(activity: HomeActivity) {
++        // The bookmarks may change with each sync. Like Firefox, wait for the accounts to be ready.
++        val backgroundServices = activity.components.backgroundServices
++        backgroundServices.accountManagerAvailableQueue.runIfReadyOrQueue {
++            activity.lifecycleScope.launch {
++                backgroundServices.accountManager.registerForSyncEvents(
++                    object : SyncStatusObserver {
++                        override fun onStarted() = Unit
++
++                        override fun onIdle() = refresh()
++
++                        override fun onError(error: Exception?) = Unit
++                    },
++                    owner = activity,
++                    autoPause = false,
++                )
++            }
++        }
++
++        if (preferences != null) return
++        val preferences = activity.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
++        this.preferences = preferences
++        isBarShown.value = preferences.getBoolean(PREF_IS_SHOWN, true)
++
++        val bookmarksStorage = activity.components.core.bookmarksStorage
++        scope.launch {
++            // Also reads them right away: the requests made before don't wait for the first reading.
++            refreshRequests.onStart { emit(Unit) }.collectLatest {
++                bookmarksStorage.getTree(BookmarkRoot.Toolbar.id, recursive = true).getOrNull()?.let {
++                    toolbarFolder.value = it
++                }
++            }
++        }
++    }
++
++    override fun onKeyEvent(
++        activity: HomeActivity,
++        event: KeyEvent,
++    ): Boolean {
++        if (!isBookmarksBarShortcut(event.keyCode, event.metaState) || !AdaptiveTabStrip.isTabStripAllowed) {
++            return false
++        }
++        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) setBarShown(!isBarShown.value)
++        return true
++    }
++
++    override fun keyboardShortcuts(context: Context): List<KeyboardShortcutInfo> =
++        listOf(
++            KeyboardShortcutInfo(
++                context.getString(R.string.bookmarks_bar_shortcut),
++                KeyEvent.KEYCODE_B,
++                KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON,
++            ),
++        )
++
++    override fun addCustomizationPreferences(fragment: PreferenceFragmentCompat) {
++        val context = fragment.requireContext()
++        val category =
++            PreferenceCategory(context).apply {
++                title = context.getString(R.string.bookmarks_bar_preferences_category)
++                isIconSpaceReserved = false
++            }
++        fragment.preferenceScreen.addPreference(category)
++        category.addPreference(
++            SwitchPreferenceCompat(context).apply {
++                isPersistent = false
++                isIconSpaceReserved = false
++                title = context.getString(R.string.bookmarks_bar_preference_title)
++                summary = context.getString(R.string.bookmarks_bar_preference_summary)
++                isChecked = isBarShown.value
++                setOnPreferenceChangeListener { _, newValue ->
++                    setBarShown(newValue as Boolean)
++                    true
++                }
++            },
++        )
++    }
++
++    @Composable
++    override fun AddressBarRow(isHomepage: Boolean) {
++        val isShown by isBarShown.collectAsState()
++        if (!isShown || !AdaptiveTabStrip.isTabStripAllowed) return
++
++        val context = LocalContext.current
++        val lifecycleOwner = LocalLifecycleOwner.current
++        LaunchedEffect(lifecycleOwner) {
++            lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) { refresh() }
++        }
++        val folder by toolbarFolder.collectAsState()
++        val mode by context.components.appStore.observeAsComposableState { it.mode }
++
++        BookmarksBar(
++            folder = folder,
++            isPrivate = mode.isPrivate,
++            actions =
++                BookmarksBarActions(
++                    onOpen = { bookmark, opening -> open(context, bookmark, opening, isHomepage) },
++                    onEdit = { edit(context, it) },
++                    onDelete = { delete(context, it) },
++                ),
++        )
++    }
++
++    override fun addressBarRowHeight(context: Context): Int =
++        if (isBarShown.value && AdaptiveTabStrip.isTabStripAllowed) {
++            (BOOKMARKS_BAR_HEIGHT_DP * context.resources.displayMetrics.density).roundToInt()
++        } else {
++            0
++        }
++
++    private fun refresh() {
++        refreshRequests.tryEmit(Unit)
++    }
++
++    private fun setBarShown(isShown: Boolean) {
++        if (isBarShown.value == isShown) return
++        isBarShown.value = isShown
++        preferences?.edit { putBoolean(PREF_IS_SHOWN, isShown) }
++        PatchFeatureHooks.onAddressBarRowsChanged()
++    }
++
++    private fun open(
++        context: Context,
++        bookmark: BookmarkNode,
++        opening: BookmarkOpening,
++        isHomepage: Boolean,
++    ) {
++        val url = bookmark.url ?: return
++        val activity = context.findHomeActivity() ?: return
++        val components = activity.components
++        val isPrivate = components.appStore.state.mode.isPrivate
++        // Like the bookmarks of the homepage, which may be bookmarklets.
++        val flags = LoadUrlFlags.select(ALLOW_JAVASCRIPT_URL)
++        if (opening == BookmarkOpening.BACKGROUND_TAB) {
++            components.useCases.tabsUseCases.addTab(url = url, selectTab = false, flags = flags, private = isPrivate)
++            return
++        }
++
++        endSearch(activity)
++        activity.openToBrowser(if (isHomepage) BrowserDirection.FromHome else BrowserDirection.FromGlobal)
++        components.useCases.fenixBrowserUseCases.loadUrlOrSearch(
++            searchTermOrURL = url,
++            // From the homepage, like its bookmarks: in its tab when the homepage is a tab, otherwise in a new tab.
++            newTab =
++                opening != BookmarkOpening.CURRENT_TAB ||
++                    (isHomepage && !components.settings.enableHomepageAsNewTab),
++            private = isPrivate || opening == BookmarkOpening.PRIVATE_TAB,
++            flags = flags,
++        )
++    }
++
++    private fun edit(
++        context: Context,
++        bookmark: BookmarkNode,
++    ) {
++        val activity = context.findHomeActivity() ?: return
++        endSearch(activity)
++        activity
++            .findNavController(R.id.container)
++            .navigate(
++                NavGraphDirections.actionGlobalBookmarkEditFragment(
++                    guidToEdit = bookmark.guid,
++                    requiresSnackbarPaddingForToolbar = true,
++                ),
++            )
++    }
++
++    private fun delete(
++        context: Context,
++        bookmark: BookmarkNode,
++    ) {
++        val bookmarksStorage = context.components.core.bookmarksStorage
++        scope.launch {
++            bookmarksStorage.deleteNode(bookmark.guid)
++            refresh()
++        }
++    }
++
++    /** Leaves the address bar if the user is typing in it, as the page changes. */
++    private fun endSearch(activity: HomeActivity) {
++        val appStore = activity.components.appStore
++        if (appStore.state.searchState.isSearchActive) appStore.dispatch(SearchEnded)
++    }
++}
+diff --git a/mobile/android/fenix/app/src/main/res/values-it/bookmarks_bar_strings.xml b/mobile/android/fenix/app/src/main/res/values-it/bookmarks_bar_strings.xml
+new file mode 100644
+index 00000000..eba78ed2
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/res/values-it/bookmarks_bar_strings.xml
+@@ -0,0 +1,17 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++<resources>
++    <string name="bookmarks_bar_empty">Aggiungi segnalibri alla cartella «Barra dei segnalibri» per vederli qui</string>
++    <string name="bookmarks_bar_empty_folder">(Vuota)</string>
++    <string name="bookmarks_bar_more">Altri segnalibri</string>
++    <string name="bookmarks_bar_open_in_new_tab">Apri in nuova scheda</string>
++    <string name="bookmarks_bar_open_in_private_tab">Apri in scheda privata</string>
++    <string name="bookmarks_bar_edit">Modifica</string>
++    <string name="bookmarks_bar_delete">Elimina</string>
++    <string name="bookmarks_bar_preferences_category">Barra dei segnalibri (schermo grande)</string>
++    <string name="bookmarks_bar_preference_title">Mostra la barra dei segnalibri</string>
++    <string name="bookmarks_bar_preference_summary">I segnalibri della cartella «Barra dei segnalibri», quella di Firefox per computer, accanto alla barra degli indirizzi (Ctrl+Maiusc+B)</string>
++    <string name="bookmarks_bar_shortcut">Mostra o nascondi la barra dei segnalibri</string>
++</resources>
+diff --git a/mobile/android/fenix/app/src/main/res/values/bookmarks_bar_strings.xml b/mobile/android/fenix/app/src/main/res/values/bookmarks_bar_strings.xml
+new file mode 100644
+index 00000000..dddd51c9
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/res/values/bookmarks_bar_strings.xml
+@@ -0,0 +1,30 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++<!-- Bookmarks toolbar of the patch with the Chrome-like tab strip. Only translated in Italian. -->
++<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
++    <!-- Shown in the bookmarks toolbar when the "Bookmarks Toolbar" folder (the one of Firefox for desktop) is
++         empty. -->
++    <string name="bookmarks_bar_empty">Add bookmarks to the “Bookmarks Toolbar” folder to see them here</string>
++    <!-- Shown in the menu of an empty folder of the bookmarks toolbar. -->
++    <string name="bookmarks_bar_empty_folder">(Empty)</string>
++    <!-- Description of the » button of the bookmarks toolbar, which shows the bookmarks that don't fit in it. -->
++    <string name="bookmarks_bar_more">More bookmarks</string>
++    <!-- Item of the menu of a bookmark of the bookmarks toolbar. -->
++    <string name="bookmarks_bar_open_in_new_tab">Open in new tab</string>
++    <!-- Item of the menu of a bookmark of the bookmarks toolbar. -->
++    <string name="bookmarks_bar_open_in_private_tab">Open in private tab</string>
++    <!-- Item of the menu of a bookmark of the bookmarks toolbar, which opens the bookmark editor. -->
++    <string name="bookmarks_bar_edit">Edit</string>
++    <!-- Item of the menu of a bookmark of the bookmarks toolbar. -->
++    <string name="bookmarks_bar_delete">Delete</string>
++    <!-- Title of the bookmarks toolbar preferences in Settings → Customize. -->
++    <string name="bookmarks_bar_preferences_category">Bookmarks toolbar (large screen)</string>
++    <!-- Preference showing or hiding the bookmarks toolbar. -->
++    <string name="bookmarks_bar_preference_title">Show the bookmarks toolbar</string>
++    <!-- Summary of the preference showing or hiding the bookmarks toolbar. -->
++    <string name="bookmarks_bar_preference_summary">The bookmarks of the “Bookmarks Toolbar” folder, the one of Firefox for desktop, next to the address bar (Ctrl+Shift+B)</string>
++    <!-- Keyboard shortcut (Ctrl+Shift+B) listed by the keyboard shortcuts helper of Android. -->
++    <string name="bookmarks_bar_shortcut">Show or hide the bookmarks toolbar</string>
++</resources>
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/BookmarksBarTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/BookmarksBarTest.kt
+new file mode 100644
+index 00000000..d2ca969a
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/BookmarksBarTest.kt
+@@ -0,0 +1,80 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import android.view.KeyEvent
++import mozilla.components.concept.storage.BookmarkNode
++import mozilla.components.concept.storage.BookmarkNodeType
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++private const val CTRL = KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
++private const val SHIFT = KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON
++
++class BookmarksBarTest {
++    @Test
++    fun `WHEN listing the items of a folder THEN the bookmarks without an address are left out`() {
++        val bookmark = node("1", BookmarkNodeType.ITEM, url = "https://example.com")
++        val folder = node("2", BookmarkNodeType.FOLDER, children = emptyList())
++        val separator = node("3", BookmarkNodeType.SEPARATOR)
++        val noUrl = node("4", BookmarkNodeType.ITEM, url = " ")
++        val toolbar = node("toolbar", BookmarkNodeType.FOLDER, children = listOf(bookmark, noUrl, folder, separator))
++
++        assertEquals(listOf(bookmark, folder, separator), bookmarksBarItems(toolbar))
++        assertEquals(emptyList<BookmarkNode>(), bookmarksBarItems(null))
++        assertEquals(emptyList<BookmarkNode>(), bookmarksBarItems(node("5", BookmarkNodeType.FOLDER)))
++    }
++
++    @Test
++    fun `WHEN naming a bookmark THEN it is its title, or its address without title`() {
++        assertEquals("Example", bookmarkLabel(node("1", BookmarkNodeType.ITEM, title = "Example", url = "https://e.com")))
++        assertEquals("https://e.com", bookmarkLabel(node("1", BookmarkNodeType.ITEM, title = " ", url = "https://e.com")))
++        assertEquals("https://e.com", bookmarkLabel(node("1", BookmarkNodeType.ITEM, url = "https://e.com")))
++    }
++
++    @Test
++    fun `GIVEN items that fit WHEN laying out the bookmarks toolbar THEN all are shown without the overflow button`() {
++        assertEquals(3, visibleBookmarksCount(listOf(30, 30, 30), 100, overflowButtonWidth = 40, spacing = 5))
++        assertEquals(0, visibleBookmarksCount(emptyList(), 100, overflowButtonWidth = 40, spacing = 5))
++    }
++
++    @Test
++    fun `GIVEN too many items WHEN laying out the bookmarks toolbar THEN the overflow button takes room at the end`() {
++        // 30 + 5 + 30 + 5 + 30 = 100 > 99: the overflow button leaves 99 - 40 - 5 = 54 for the items.
++        assertEquals(1, visibleBookmarksCount(listOf(30, 30, 30), 99, overflowButtonWidth = 40, spacing = 5))
++        assertEquals(2, visibleBookmarksCount(listOf(20, 20, 30, 10), 80, overflowButtonWidth = 10, spacing = 5))
++        // Not even the first one fits.
++        assertEquals(0, visibleBookmarksCount(listOf(80, 10), 85, overflowButtonWidth = 40, spacing = 5))
++    }
++
++    @Test
++    fun `WHEN pressing Ctrl+Shift+B THEN it is the shortcut of the bookmarks toolbar`() {
++        assertTrue(isBookmarksBarShortcut(KeyEvent.KEYCODE_B, CTRL or SHIFT))
++        assertFalse(isBookmarksBarShortcut(KeyEvent.KEYCODE_B, CTRL))
++        assertFalse(isBookmarksBarShortcut(KeyEvent.KEYCODE_B, SHIFT))
++        assertFalse(isBookmarksBarShortcut(KeyEvent.KEYCODE_B, CTRL or SHIFT or KeyEvent.META_ALT_ON))
++        assertFalse(isBookmarksBarShortcut(KeyEvent.KEYCODE_N, CTRL or SHIFT))
++    }
++
++    private fun node(
++        guid: String,
++        type: BookmarkNodeType,
++        title: String? = null,
++        url: String? = null,
++        children: List<BookmarkNode>? = null,
++    ) = BookmarkNode(
++        type = type,
++        guid = guid,
++        parentGuid = null,
++        position = null,
++        title = title,
++        url = url,
++        dateAdded = 0,
++        lastModified = 0,
++        children = children,
++    )
++}

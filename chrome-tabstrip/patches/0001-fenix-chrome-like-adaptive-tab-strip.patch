@@ -3223,6 +3223,30 @@ index 00000000..210e7b08
 +        )
 +    }
 +}
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/ext/FragmentTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/ext/FragmentTest.kt
+index 96fdcef1..52a19d58 100644
+--- a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/ext/FragmentTest.kt
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/ext/FragmentTest.kt
+@@ -197,7 +197,8 @@ class FragmentTest {
+ 
+         val bottomToolbarHeight = fragment.getBottomToolbarHeight()
+ 
+-        assertEquals(291, bottomToolbarHeight)
++        // The tab strip of the patch is 40dp high, not 56dp.
++        assertEquals(275, bottomToolbarHeight)
+     }
+ 
+     @Test
+@@ -219,7 +220,8 @@ class FragmentTest {
+ 
+         val topToolbarHeight = fragment.getTopToolbarHeight()
+ 
+-        assertEquals(120, topToolbarHeight)
++        // The tab strip of the patch is 40dp high, not 56dp.
++        assertEquals(104, topToolbarHeight)
+     }
+ 
+     @Test
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/selfupdate/SelfUpdaterTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/selfupdate/SelfUpdaterTest.kt
 new file mode 100644
 index 00000000..0cc78114
