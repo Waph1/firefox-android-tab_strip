@@ -16,7 +16,7 @@ schermo grande" compare e sparisce **al volo** aprendo e chiudendo il telefono, 
 | #  | Funzione                                          | Patch                        | Tipo        | Stato        |
 |----|---------------------------------------------------|------------------------------|-------------|--------------|
 | 0  | Patch divise e avviso negli aggiornamenti         | base + `0002`                | obbligatoria | fatto       |
-| 1  | Nuova scheda con la barra degli indirizzi attiva  | `0010-new-tab-focus`         | facoltativa | da fare      |
+| 1  | Nuova scheda con la barra degli indirizzi attiva  | `0010-new-tab-focus`         | facoltativa | fatto        |
 | 2  | Scorciatoie da tastiera fisica                    | `0020-keyboard-shortcuts`    | facoltativa | da fare      |
 | 3  | Menu ⋮ a tendina                                  | `0030-dropdown-menu`         | facoltativa | da fare      |
 | 4  | Zoom della pagina come su desktop                 | `0040-page-zoom`             | facoltativa | da fare      |
@@ -113,6 +113,10 @@ nuova scheda», «ricerche di tendenza»), quindi spesso non succede.
 - mentre la barra è attiva si vede il pannello dei suggerimenti al posto della home (come upstream quando si tocca
   la barra);
 - in navigazione privata la nuova scheda è privata.
+
+**Fatto:** il "+" della tab strip, con il punto di aggancio `PatchFeatureHooks.openNewTab` della `0002`. Ctrl+T arriva
+con le scorciatoie (punto 2) e passerà dallo stesso punto di aggancio, così senza questa patch apre la nuova scheda
+come Firefox.
 
 ---
 

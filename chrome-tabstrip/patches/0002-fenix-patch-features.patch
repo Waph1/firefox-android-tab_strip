@@ -119,10 +119,18 @@ index 63262fea..14af90c0 100644
  }
  
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
-index 91f7571e..7aacb0c8 100644
+index 91f7571e..cd5535d0 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
-@@ -66,6 +66,8 @@ import androidx.compose.ui.unit.dp
+@@ -46,6 +46,7 @@ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.draw.clip
+ import androidx.compose.ui.graphics.asImageBitmap
++import androidx.compose.ui.platform.LocalContext
+ import androidx.compose.ui.res.dimensionResource
+ import androidx.compose.ui.res.painterResource
+ import androidx.compose.ui.res.stringResource
+@@ -66,6 +67,8 @@ import androidx.compose.ui.unit.dp
  import androidx.core.text.BidiFormatter
  import kotlinx.coroutines.flow.map
  import mozilla.components.browser.state.action.TabListAction
@@ -131,7 +139,7 @@ index 91f7571e..7aacb0c8 100644
  import mozilla.components.browser.state.state.createTab
  import mozilla.components.browser.state.store.BrowserStore
  import mozilla.components.compose.base.button.IconButton
-@@ -75,6 +77,7 @@ import mozilla.components.compose.base.theme.Theme
+@@ -75,6 +78,7 @@ import mozilla.components.compose.base.theme.Theme
  import mozilla.components.compose.base.theme.ThemedValue
  import mozilla.components.compose.base.theme.ThemedValueProvider
  import mozilla.components.concept.engine.utils.ABOUT_HOME_URL
@@ -139,7 +147,15 @@ index 91f7571e..7aacb0c8 100644
  import mozilla.components.feature.tabs.TabsUseCases
  import mozilla.components.support.utils.KeyboardState
  import mozilla.components.support.utils.keyboardAsState
-@@ -112,9 +115,11 @@ private val tabStripIconSize
+@@ -86,6 +90,7 @@ import org.mozilla.fenix.components.components
+ import org.mozilla.fenix.compose.Favicon
+ import org.mozilla.fenix.compose.HorizontalFadingEdgeBox
+ import org.mozilla.fenix.compose.ext.isItemPartiallyVisible
++import org.mozilla.fenix.patchfeatures.PatchFeatureHooks
+ import org.mozilla.fenix.tabstray.browser.compose.ReorderableDragItemContainer
+ import org.mozilla.fenix.tabstray.browser.compose.createListReorderState
+ import org.mozilla.fenix.tabstray.browser.compose.detectListPressAndDrag
+@@ -112,9 +117,11 @@ private val tabStripIconSize
   * @param browserStore The [BrowserStore] instance used to observe tabs state.
   * @param appStore The [AppStore] instance used to observe browsing mode.
   * @param tabsUseCases The [TabsUseCases] instance to perform tab actions.
@@ -151,7 +167,7 @@ index 91f7571e..7aacb0c8 100644
   * @param onLastTabClose Invoked when the last remaining open tab is closed.
   * @param onSelectedTabClick Invoked when a tab is selected.
   * @param onTabCounterClick Invoked when tab counter is clicked.
-@@ -127,9 +132,11 @@ fun TabStrip(
+@@ -127,9 +134,11 @@ fun TabStrip(
      browserStore: BrowserStore = components.core.store,
      appStore: AppStore = components.appStore,
      tabsUseCases: TabsUseCases = components.useCases.tabsUseCases,
@@ -163,7 +179,26 @@ index 91f7571e..7aacb0c8 100644
      onLastTabClose: (isPrivate: Boolean) -> Unit,
      onSelectedTabClick: (url: String) -> Unit,
      onTabCounterClick: () -> Unit,
-@@ -198,10 +205,35 @@ fun TabStrip(
+@@ -169,6 +178,9 @@ fun TabStrip(
+             false
+         }
+ 
++    // The optional features of the patch can open the new tabs in place of Firefox.
++    val context = LocalContext.current
++
+     AnimatedVisibility(
+         visible = !isKeyboardVisible,
+         enter =
+@@ -187,7 +199,7 @@ fun TabStrip(
+             modeToggle = rememberTabStripModeToggle(browserStore, state.isPrivateMode),
+             showTabCounterButton = showTabCounterButton,
+             colors = tabStripColors,
+-            onAddTabClick = createAddTabClickHandler(onAddTabClick),
++            onAddTabClick = createAddTabClickHandler { if (!PatchFeatureHooks.newTabOpened(context)) onAddTabClick() },
+             onCloseTabClick =
+                 createCloseTabClickHandler(
+                     numberOfTabs = state.tabs.size,
+@@ -198,10 +210,35 @@ fun TabStrip(
              onSelectedTabClick = createSelectedTabClickHandler(tabsUseCases, onSelectedTabClick),
              onMove = createMoveTabHandler(tabsUseCases),
              onTabCounterClick = onTabCounterClick,
@@ -302,20 +337,23 @@ index 1312a62f..eb50448e 100644
          }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
 new file mode 100644
-index 00000000..2ddccc8d
+index 00000000..e463b919
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,171 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
 +package org.mozilla.fenix.patchfeatures
 +
++import android.content.Context
++import android.content.ContextWrapper
 +import mozilla.components.compose.base.menu.MenuItem
 +import org.json.JSONArray
 +import org.json.JSONException
 +import org.json.JSONObject
++import org.mozilla.fenix.HomeActivity
 +import java.util.Locale
 +
 +private const val DEFAULT_LANGUAGE = "en"
@@ -442,12 +480,38 @@ index 00000000..2ddccc8d
 +    /** Items the feature adds to the menu of [tab] in the tab strip (long press, or right click). */
 +    fun tabStripMenuItems(tab: TabStripMenuTab): List<MenuItem> = emptyList()
 +
++    /**
++     * Opens a new tab in place of Firefox, when the new tab button of the tab strip is tapped. Returns whether the
++     * feature opened it: if no feature does, Firefox opens it as usual.
++     *
++     * @param activity The activity showing the tab strip.
++     */
++    fun openNewTab(activity: HomeActivity): Boolean = false
++
 +    companion object {
 +        /** The entry points of the optional features included in this build. */
 +        val all: List<PatchFeatureHooks>
 +            get() = GeneratedPatchFeatures.hooks
++
++        /**
++         * Lets the optional features open a new tab (see [PatchFeatureHooks.openNewTab]) and returns whether one of
++         * them did.
++         *
++         * @param context A context of the activity showing the tab strip.
++         */
++        fun newTabOpened(context: Context): Boolean {
++            val activity = context.findHomeActivity() ?: return false
++            return all.any { it.openNewTab(activity) }
++        }
 +    }
 +}
++
++private tailrec fun Context.findHomeActivity(): HomeActivity? =
++    when (this) {
++        is HomeActivity -> this
++        is ContextWrapper -> baseContext.findHomeActivity()
++        else -> null
++    }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeaturesDialog.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeaturesDialog.kt
 new file mode 100644
 index 00000000..2c1fdae5
