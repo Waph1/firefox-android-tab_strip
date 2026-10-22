@@ -92,10 +92,20 @@ index b8b89301..952ab026 100644
              )
          }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
-index 63262fea..14af90c0 100644
+index 63262fea..c2a545d7 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
-@@ -168,7 +168,8 @@ internal fun BrowserState.toTabStripModeToggle(isPrivateMode: Boolean): TabStrip
+@@ -96,6 +96,9 @@ import org.mozilla.fenix.R
+ import org.mozilla.fenix.compose.Favicon
+ import org.mozilla.fenix.compose.ext.isItemPartiallyVisible
+ import org.mozilla.fenix.home.ui.getAttr
++import org.mozilla.fenix.patchfeatures.PatchFeatureHooks
++import org.mozilla.fenix.patchfeatures.TabStripTabActions
++import org.mozilla.fenix.patchfeatures.TabStripTabInfo
+ import org.mozilla.fenix.tabstray.browser.compose.ReorderableDragItemContainer
+ import org.mozilla.fenix.tabstray.browser.compose.createListReorderState
+ import org.mozilla.fenix.tabstray.browser.compose.detectListPressAndDrag
+@@ -168,7 +171,8 @@ internal fun BrowserState.toTabStripModeToggle(isPrivateMode: Boolean): TabStrip
   *   the finger, then they resize;
   * - new tabs slide up into the strip and closed tabs slide down out of it;
   * - the new tab button follows the last tab and sticks to the end of the strip when tabs overflow;
@@ -105,7 +115,7 @@ index 63262fea..14af90c0 100644
   *
   * @param state The [TabStripState] to render.
   * @param colors The [TabStripColors] to use.
-@@ -179,6 +180,7 @@ internal fun BrowserState.toTabStripModeToggle(isPrivateMode: Boolean): TabStrip
+@@ -179,6 +183,7 @@ internal fun BrowserState.toTabStripModeToggle(isPrivateMode: Boolean): TabStrip
   * @param onSelectedTabClick Invoked when a tab, or the browsing mode toggle, is clicked.
   * @param onMove Invoked when a tab is moved by dragging it.
   * @param onTabCounterClick Invoked when the tab counter is clicked.
@@ -113,7 +123,7 @@ index 63262fea..14af90c0 100644
   */
  @Composable
  @Suppress("LongParameterList")
-@@ -192,6 +194,7 @@ internal fun ChromeStyleTabStripContent(
+@@ -192,6 +197,7 @@ internal fun ChromeStyleTabStripContent(
      onSelectedTabClick: (tabId: String, url: String) -> Unit,
      onMove: (tabId: String, targetId: String, placeAfter: Boolean) -> Unit,
      onTabCounterClick: () -> Unit,
@@ -121,7 +131,7 @@ index 63262fea..14af90c0 100644
  ) {
      Row(
          modifier =
-@@ -213,6 +216,7 @@ internal fun ChromeStyleTabStripContent(
+@@ -213,6 +219,7 @@ internal fun ChromeStyleTabStripContent(
                  onCloseTabClick = onCloseTabClick,
                  onSelectedTabClick = onSelectedTabClick,
                  onMove = onMove,
@@ -129,7 +139,7 @@ index 63262fea..14af90c0 100644
              )
  
              IconButton(onClick = onAddTabClick, contentDescription = stringResource(R.string.add_tab)) {
-@@ -253,6 +257,7 @@ private fun ChromeStyleTabsList(
+@@ -253,6 +260,7 @@ private fun ChromeStyleTabsList(
      onCloseTabClick: (id: String, isPrivate: Boolean) -> Unit,
      onSelectedTabClick: (tabId: String, url: String) -> Unit,
      onMove: (tabId: String, targetId: String, placeAfter: Boolean) -> Unit,
@@ -137,7 +147,7 @@ index 63262fea..14af90c0 100644
  ) {
      BoxWithConstraints(modifier = modifier) {
          val listState = rememberLazyListState()
-@@ -281,6 +286,9 @@ private fun ChromeStyleTabsList(
+@@ -281,6 +289,9 @@ private fun ChromeStyleTabsList(
  
          val newTabIds = rememberNewTabIds(state.tabs)
  
@@ -147,7 +157,7 @@ index 63262fea..14af90c0 100644
          val reorderState =
              createListReorderState(
                  listState = listState,
-@@ -292,6 +300,8 @@ private fun ChromeStyleTabsList(
+@@ -292,11 +303,14 @@ private fun ChromeStyleTabsList(
                      )
                  },
                  ignoredItems = emptyList(),
@@ -156,41 +166,254 @@ index 63262fea..14af90c0 100644
              )
  
          LazyRow(
-@@ -332,6 +342,10 @@ private fun ChromeStyleTabsList(
+             modifier =
+                 Modifier.fillMaxHeight()
++                    .then(PatchFeatureHooks.tabStripModifiers(listState))
+                     .detectListPressAndDrag(
+                         reorderState = reorderState,
+                         listState = listState,
+@@ -332,6 +346,11 @@ private fun ChromeStyleTabsList(
                              onCloseTabClick(id, isPrivate)
                          },
                          onSelectedTabClick = onSelectedTabClick,
 +                        isMenuShown = menuTabId == itemState.id,
 +                        hasOtherTabs = state.tabs.size > 1,
 +                        menuActions = tabMenuActions,
++                        onShowMenu = { menuTabId = itemState.id },
 +                        onDismissMenu = { menuTabId = null },
                          modifier =
                              Modifier.thenConditional(
                                  modifier = Modifier.semantics { traversalIndex = -1f },
-@@ -395,6 +409,10 @@ private fun ChromeStyleTabItem(
+@@ -395,6 +414,11 @@ private fun ChromeStyleTabItem(
      backgroundColors: TabStripColors.TabColors,
      onCloseTabClick: (id: String, isPrivate: Boolean) -> Unit,
      onSelectedTabClick: (id: String, url: String) -> Unit,
 +    isMenuShown: Boolean,
 +    hasOtherTabs: Boolean,
 +    menuActions: TabStripTabMenuActions,
++    onShowMenu: () -> Unit,
 +    onDismissMenu: () -> Unit,
      modifier: Modifier = Modifier,
  ) {
      val folioColor = backgroundColors.get(isActive = true)
-@@ -536,6 +554,12 @@ private fun ChromeStyleTabItem(
-                 Spacer(modifier = Modifier.width(tabContentEndPadding))
-             }
-         }
+@@ -427,114 +451,128 @@ private fun ChromeStyleTabItem(
+ 
+     val closeTabLabel = stringResource(R.string.close_tab)
+ 
+-    Box(
+-        modifier =
+-            modifier
+-                .width(width)
+-                .fillMaxHeight()
+-                .graphicsLayer {
+-                    translationY = maxOf(slideIn.value, slideOut.value) * size.height
+-                    alpha = 1f - slideOut.value
+-                }
+-                .drawBehind {
+-                    if (showEndDivider) {
+-                        drawEndDivider(color = dividerColor)
+-                    }
+-                    if (folioAlpha > 0f) {
+-                        drawPath(
+-                            path =
+-                                folioPath(
+-                                    top = tabTopMargin.toPx(),
+-                                    cornerRadius = folioCornerRadius.toPx(),
+-                                    footRadius = folioFootRadius.toPx(),
+-                                ),
+-                            color = folioColor,
+-                            alpha = folioAlpha,
+-                        )
+-                    }
+-                },
++    // The optional features of the patch may add to the tab, e.g. for the mouse.
++    PatchFeatureHooks.TabStripTab(
++        tab = TabStripTabInfo(state.id, state.title, state.url, state.isPrivate, state.isSelected),
++        actions = TabStripTabActions(onClose = closeTab, onShowMenu = onShowMenu),
+     ) {
+-        Row(
++        Box(
+             modifier =
+-                Modifier.fillMaxSize()
+-                    .padding(top = tabTopMargin)
+-                    .clip(RoundedCornerShape(topStart = folioCornerRadius, topEnd = folioCornerRadius))
+-                    .clickable { onSelectedTabClick(state.id, state.url) }
+-                    .semantics {
+-                        role = Role.Tab
+-                        selected = state.isSelected
+-                        customActions =
+-                            listOf(
+-                                CustomAccessibilityAction(label = closeTabLabel) {
+-                                    closeTab()
+-                                    true
+-                                },
+-                            )
++                modifier
++                    .width(width)
++                    .fillMaxHeight()
++                    .graphicsLayer {
++                        translationY = maxOf(slideIn.value, slideOut.value) * size.height
++                        alpha = 1f - slideOut.value
+                     }
+-                    .padding(start = tabContentStartPadding, end = tabContentEndPadding),
+-            verticalAlignment = Alignment.CenterVertically,
++                    .drawBehind {
++                        if (showEndDivider) {
++                            drawEndDivider(color = dividerColor)
++                        }
++                        if (folioAlpha > 0f) {
++                            drawPath(
++                                path =
++                                    folioPath(
++                                        top = tabTopMargin.toPx(),
++                                        cornerRadius = folioCornerRadius.toPx(),
++                                        footRadius = folioFootRadius.toPx(),
++                                    ),
++                                color = folioColor,
++                                alpha = folioAlpha,
++                            )
++                        }
++                    },
+         ) {
+-            TabIcon(
+-                url = state.url,
+-                icon = state.icon,
+-                isLoading = state.isLoading,
+-            )
+-
+-            Spacer(modifier = Modifier.width(faviconTitleSpacing))
+-
+-            // This makes sure that isRtl is only calculated when the title changes.
+-            val isTitleRtl = remember(state.title) { BidiFormatter.getInstance().isRtl(state.title) }
+-
+-            Box(
++            Row(
+                 modifier =
+-                    Modifier.weight(1f).fillMaxHeight().fadingEdge(fadeWidth = titleFadeWidth, fadeLeft = isTitleRtl),
+-                contentAlignment = Alignment.CenterStart,
++                    Modifier.fillMaxSize()
++                        .padding(top = tabTopMargin)
++                        .clip(RoundedCornerShape(topStart = folioCornerRadius, topEnd = folioCornerRadius))
++                        .clickable { onSelectedTabClick(state.id, state.url) }
++                        .semantics {
++                            role = Role.Tab
++                            selected = state.isSelected
++                            customActions =
++                                listOf(
++                                    CustomAccessibilityAction(label = closeTabLabel) {
++                                        closeTab()
++                                        true
++                                    },
++                                )
++                        }
++                        .padding(start = tabContentStartPadding, end = tabContentEndPadding),
++                verticalAlignment = Alignment.CenterVertically,
+             ) {
+-                Text(
+-                    text = state.title,
+-                    color =
+-                        if (state.isSelected) {
+-                            MaterialTheme.colorScheme.onSurface
+-                        } else {
+-                            MaterialTheme.colorScheme.onSurfaceVariant
+-                        },
+-                    softWrap = false,
+-                    maxLines = 1,
+-                    style = FirefoxTheme.typography.body2.copy(fontSize = 13.sp),
++                TabIcon(
++                    url = state.url,
++                    icon = state.icon,
++                    isLoading = state.isLoading,
+                 )
+-            }
+ 
+-            if (showCloseButton) {
+-                val closeButtonDescription = stringResource(id = R.string.close_tab_title, state.title)
++                Spacer(modifier = Modifier.width(faviconTitleSpacing))
 +
-+        TabStripTabMenu(
-+            expanded = isMenuShown,
-+            menuItems = { tabStripTabMenuItems(state, hasOtherTabs, menuActions, onClose = closeTab) },
-+            onDismissRequest = onDismissMenu,
-+        )
++                // This makes sure that isRtl is only calculated when the title changes.
++                val isTitleRtl = remember(state.title) { BidiFormatter.getInstance().isRtl(state.title) }
++
+                 Box(
+                     modifier =
+-                        Modifier.size(closeButtonSize)
+-                            .clip(CircleShape)
+-                            .clickable(onClick = closeTab)
+-                            .then(
+-                                if (state.isSelected) {
+-                                    Modifier.semantics { contentDescription = closeButtonDescription }
+-                                } else {
+-                                    Modifier.clearAndSetSemantics {}
+-                                },
+-                            ),
+-                    contentAlignment = Alignment.Center,
++                        Modifier.weight(1f)
++                            .fillMaxHeight()
++                            .fadingEdge(fadeWidth = titleFadeWidth, fadeLeft = isTitleRtl),
++                    contentAlignment = Alignment.CenterStart,
+                 ) {
+-                    Icon(
+-                        painter = painterResource(iconsR.drawable.mozac_ic_cross_20),
+-                        modifier = Modifier.size(closeIconSize),
+-                        tint =
++                    Text(
++                        text = state.title,
++                        color =
+                             if (state.isSelected) {
+                                 MaterialTheme.colorScheme.onSurface
+                             } else {
+                                 MaterialTheme.colorScheme.onSurfaceVariant
+                             },
+-                        contentDescription = null,
++                        softWrap = false,
++                        maxLines = 1,
++                        style = FirefoxTheme.typography.body2.copy(fontSize = 13.sp),
+                     )
+                 }
+-            } else {
+-                Spacer(modifier = Modifier.width(tabContentEndPadding))
++
++                if (showCloseButton) {
++                    val closeButtonDescription = stringResource(id = R.string.close_tab_title, state.title)
++                    Box(
++                        modifier =
++                            Modifier.size(closeButtonSize)
++                                .clip(CircleShape)
++                                .clickable(onClick = closeTab)
++                                .then(
++                                    if (state.isSelected) {
++                                        Modifier.semantics { contentDescription = closeButtonDescription }
++                                    } else {
++                                        Modifier.clearAndSetSemantics {}
++                                    },
++                                ),
++                        contentAlignment = Alignment.Center,
++                    ) {
++                        Icon(
++                            painter = painterResource(iconsR.drawable.mozac_ic_cross_20),
++                            modifier = Modifier.size(closeIconSize),
++                            tint =
++                                if (state.isSelected) {
++                                    MaterialTheme.colorScheme.onSurface
++                                } else {
++                                    MaterialTheme.colorScheme.onSurfaceVariant
++                                },
++                            contentDescription = null,
++                        )
++                    }
++                } else {
++                    Spacer(modifier = Modifier.width(tabContentEndPadding))
++                }
+             }
++
++            TabStripTabMenu(
++                expanded = isMenuShown,
++                menuItems = { tabStripTabMenuItems(state, hasOtherTabs, menuActions, onClose = closeTab) },
++                onDismissRequest = onDismissMenu,
++            )
+         }
      }
  }
- 
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
 index 91f7571e..cd5535d0 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
@@ -596,10 +819,10 @@ index c1741b4e..add1f644 100644
          }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
 new file mode 100644
-index 00000000..ce58ce9e
+index 00000000..7bf0a1dc
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
-@@ -0,0 +1,295 @@
+@@ -0,0 +1,377 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -612,7 +835,9 @@ index 00000000..ce58ce9e
 +import android.view.KeyEvent
 +import android.view.KeyboardShortcutGroup
 +import android.view.KeyboardShortcutInfo
++import androidx.compose.foundation.lazy.LazyListState
 +import androidx.compose.runtime.Composable
++import androidx.compose.ui.Modifier
 +import androidx.fragment.app.DialogFragment
 +import androidx.preference.PreferenceFragmentCompat
 +import kotlinx.coroutines.flow.MutableSharedFlow
@@ -741,6 +966,34 @@ index 00000000..ce58ce9e
 +)
 +
 +/**
++ * A tab of the tab strip, see [PatchFeatureHooks.TabStripTab].
++ *
++ * @property id The id of the tab.
++ * @property title The title of the page.
++ * @property url The address of the page.
++ * @property isPrivate Whether it's a private tab.
++ * @property isSelected Whether it's the selected tab.
++ */
++data class TabStripTabInfo(
++    val id: String,
++    val title: String,
++    val url: String,
++    val isPrivate: Boolean,
++    val isSelected: Boolean,
++)
++
++/**
++ * What the tab strip does with one of its tabs, see [PatchFeatureHooks.TabStripTab].
++ *
++ * @property onClose Closes the tab, with the animation of the tab strip.
++ * @property onShowMenu Shows the menu of the tab, the one of a long press.
++ */
++data class TabStripTabActions(
++    val onClose: () -> Unit,
++    val onShowMenu: () -> Unit,
++)
++
++/**
 + * Entry point of an optional feature, which the code of the mandatory patches calls (see [all]): every optional patch
 + * defines an object implementing it, named after the patch (e.g. `TabGroupsFeature` for `0080-tab-groups.patch`).
 + *
@@ -758,6 +1011,28 @@ index 00000000..ce58ce9e
 +
 +    /** Items the feature adds to the menu of [tab] in the tab strip (long press, or right click). */
 +    fun tabStripMenuItems(tab: TabStripMenuTab): List<MenuItem> = emptyList()
++
++    /**
++     * Shows a tab of the tab strip, e.g. to handle the mouse on it: the feature shows [content] (the tab of Firefox,
++     * or of the other features) with what it adds.
++     *
++     * @param tab The tab.
++     * @param actions What the tab strip does with the tab.
++     * @param content The tab.
++     */
++    @Composable
++    fun TabStripTab(
++        tab: TabStripTabInfo,
++        actions: TabStripTabActions,
++        content: @Composable () -> Unit,
++    ) = content()
++
++    /**
++     * Modifier the feature adds to the list of the tabs of the tab strip, e.g. to scroll it with the mouse wheel.
++     *
++     * @param listState The scroll state of the list.
++     */
++    fun tabStripModifier(listState: LazyListState): Modifier = Modifier
 +
 +    /**
 +     * Opens a new tab in place of Firefox, when the new tab button of the tab strip is tapped (or a keyboard shortcut
@@ -871,6 +1146,36 @@ index 00000000..ce58ce9e
 +            if (shortcuts.isEmpty()) return null
 +            return KeyboardShortcutGroup(context.getString(R.string.app_name), shortcuts)
 +        }
++
++        /** Shows a tab of the tab strip through the optional features, see [PatchFeatureHooks.TabStripTab]. */
++        @Composable
++        fun TabStripTab(
++            tab: TabStripTabInfo,
++            actions: TabStripTabActions,
++            content: @Composable () -> Unit,
++        ) {
++            TabStripTabOf(all, tab, actions, content)
++        }
++
++        @Composable
++        private fun TabStripTabOf(
++            hooks: List<PatchFeatureHooks>,
++            tab: TabStripTabInfo,
++            actions: TabStripTabActions,
++            content: @Composable () -> Unit,
++        ) {
++            if (hooks.isEmpty()) {
++                content()
++            } else {
++                hooks.first().TabStripTab(tab, actions) { TabStripTabOf(hooks.drop(1), tab, actions, content) }
++            }
++        }
++
++        /** The modifiers of the optional features for the list of tabs, see [PatchFeatureHooks.tabStripModifier]. */
++        fun tabStripModifiers(listState: LazyListState): Modifier =
++            all.fold<PatchFeatureHooks, Modifier>(Modifier) { modifier, hooks ->
++                modifier.then(hooks.tabStripModifier(listState))
++            }
 +
 +        /** The rows of the optional features next to the address bar, see [PatchFeatureHooks.AddressBarRow]. */
 +        @Composable

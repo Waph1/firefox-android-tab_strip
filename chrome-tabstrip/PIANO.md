@@ -21,7 +21,7 @@ schermo grande" compare e sparisce **al volo** aprendo e chiudendo il telefono, 
 | 3  | Menu ⋮ a tendina                                  | `0030-dropdown-menu`         | facoltativa | fatto        |
 | 4  | Zoom della pagina come su desktop                 | `0040-page-zoom`             | facoltativa | fatto        |
 | 5  | Barra dei segnalibri                              | `0050-bookmarks-bar`         | facoltativa | fatto        |
-| 6  | Mouse e trackpad                                  | `0060-mouse`                 | facoltativa | da fare      |
+| 6  | Mouse e trackpad                                  | `0060-mouse`                 | facoltativa | fatto        |
 | 7  | Icona audio sulle schede                          | `0070-tab-audio`             | facoltativa | da fare      |
 | 8  | Gruppi di schede nella tab strip                  | `0080-tab-groups`            | facoltativa | da fare      |
 
@@ -253,6 +253,10 @@ nella barra degli indirizzi (ad es. nella nuova scheda), come sul desktop.
 - passando sopra una scheda: suggerimento con il titolo completo, e schede e pulsante di chiusura evidenziati;
 - sulla barra dei segnalibri: clic centrale o Ctrl+clic aprono in una nuova scheda in background, tasto destro apre
   il menu del segnalibro.
+
+**Fatto**, con i nuovi punti di aggancio `TabStripTab` e `tabStripModifier` della `0002`. La barra dei segnalibri
+gestisce il mouse da sé, nella `0050`. L'evidenziazione sotto il mouse c'era già in Firefox; il suggerimento mostra
+anche il sito della scheda, come in Chrome.
 
 ---
 

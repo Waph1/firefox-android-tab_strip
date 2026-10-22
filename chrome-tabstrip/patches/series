@@ -17,3 +17,4 @@
 0030-dropdown-menu.patch                        | facoltativa  | Menu a tendina sugli schermi grandi | Dropdown menu on large screens
 0040-page-zoom.patch                            | facoltativa  | Zoom delle pagine come su computer | Desktop-like page zoom
 0050-bookmarks-bar.patch                        | facoltativa  | Barra dei segnalibri | Bookmarks toolbar
+0060-mouse.patch                                | facoltativa  | Mouse e trackpad | Mouse and trackpad
