@@ -1,0 +1,928 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
+index b8b89301..c0d5d897 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
+@@ -227,6 +227,7 @@ import org.mozilla.fenix.ext.requireComponents
+ import org.mozilla.fenix.ext.runIfFragmentIsAttached
+ import org.mozilla.fenix.ext.secure
+ import org.mozilla.fenix.ext.tabClosedUndoMessage
++import org.mozilla.fenix.ext.tabsClosedUndoMessage
+ import org.mozilla.fenix.ext.updateMicrosurveyPromptForConfigurationChange
+ import org.mozilla.fenix.messaging.FenixMessageSurfaceId
+ import org.mozilla.fenix.messaging.MessagingFeature
+@@ -1598,6 +1599,7 @@ abstract class BaseBrowserFragment :
+                 onCloseTabClick = { isPrivate ->
+                     showUndoSnackbar(requireContext().tabClosedUndoMessage(isPrivate))
+                 },
++                onCloseTabsClick = { count -> showUndoSnackbar(requireContext().tabsClosedUndoMessage(count)) },
+                 onTabCounterClick = { onTabCounterClicked(appStore.state.mode) },
+             )
+         }
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
+index 63262fea..14af90c0 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
+@@ -168,7 +168,8 @@ internal fun BrowserState.toTabStripModeToggle(isPrivateMode: Boolean): TabStrip
+  *   the finger, then they resize;
+  * - new tabs slide up into the strip and closed tabs slide down out of it;
+  * - the new tab button follows the last tab and sticks to the end of the strip when tabs overflow;
+- * - a private browsing toggle is shown when the other browsing mode has tabs.
++ * - a private browsing toggle is shown when the other browsing mode has tabs;
++ * - a long press on a tab shows its menu, which closes when the tab is dragged.
+  *
+  * @param state The [TabStripState] to render.
+  * @param colors The [TabStripColors] to use.
+@@ -179,6 +180,7 @@ internal fun BrowserState.toTabStripModeToggle(isPrivateMode: Boolean): TabStrip
+  * @param onSelectedTabClick Invoked when a tab, or the browsing mode toggle, is clicked.
+  * @param onMove Invoked when a tab is moved by dragging it.
+  * @param onTabCounterClick Invoked when the tab counter is clicked.
++ * @param tabMenuActions The actions of the menu of the tabs.
+  */
+ @Composable
+ @Suppress("LongParameterList")
+@@ -192,6 +194,7 @@ internal fun ChromeStyleTabStripContent(
+     onSelectedTabClick: (tabId: String, url: String) -> Unit,
+     onMove: (tabId: String, targetId: String, placeAfter: Boolean) -> Unit,
+     onTabCounterClick: () -> Unit,
++    tabMenuActions: TabStripTabMenuActions,
+ ) {
+     Row(
+         modifier =
+@@ -213,6 +216,7 @@ internal fun ChromeStyleTabStripContent(
+                 onCloseTabClick = onCloseTabClick,
+                 onSelectedTabClick = onSelectedTabClick,
+                 onMove = onMove,
++                tabMenuActions = tabMenuActions,
+             )
+ 
+             IconButton(onClick = onAddTabClick, contentDescription = stringResource(R.string.add_tab)) {
+@@ -253,6 +257,7 @@ private fun ChromeStyleTabsList(
+     onCloseTabClick: (id: String, isPrivate: Boolean) -> Unit,
+     onSelectedTabClick: (tabId: String, url: String) -> Unit,
+     onMove: (tabId: String, targetId: String, placeAfter: Boolean) -> Unit,
++    tabMenuActions: TabStripTabMenuActions,
+ ) {
+     BoxWithConstraints(modifier = modifier) {
+         val listState = rememberLazyListState()
+@@ -281,6 +286,9 @@ private fun ChromeStyleTabsList(
+ 
+         val newTabIds = rememberNewTabIds(state.tabs)
+ 
++        // Like Chrome, a long press on a tab shows its menu, and dragging the tab closes it.
++        var menuTabId by remember { mutableStateOf<String?>(null) }
++
+         val reorderState =
+             createListReorderState(
+                 listState = listState,
+@@ -292,6 +300,8 @@ private fun ChromeStyleTabsList(
+                     )
+                 },
+                 ignoredItems = emptyList(),
++                onLongPress = { item -> menuTabId = item.key as String },
++                onExitLongPress = { menuTabId = null },
+             )
+ 
+         LazyRow(
+@@ -332,6 +342,10 @@ private fun ChromeStyleTabsList(
+                             onCloseTabClick(id, isPrivate)
+                         },
+                         onSelectedTabClick = onSelectedTabClick,
++                        isMenuShown = menuTabId == itemState.id,
++                        hasOtherTabs = state.tabs.size > 1,
++                        menuActions = tabMenuActions,
++                        onDismissMenu = { menuTabId = null },
+                         modifier =
+                             Modifier.thenConditional(
+                                 modifier = Modifier.semantics { traversalIndex = -1f },
+@@ -395,6 +409,10 @@ private fun ChromeStyleTabItem(
+     backgroundColors: TabStripColors.TabColors,
+     onCloseTabClick: (id: String, isPrivate: Boolean) -> Unit,
+     onSelectedTabClick: (id: String, url: String) -> Unit,
++    isMenuShown: Boolean,
++    hasOtherTabs: Boolean,
++    menuActions: TabStripTabMenuActions,
++    onDismissMenu: () -> Unit,
+     modifier: Modifier = Modifier,
+ ) {
+     val folioColor = backgroundColors.get(isActive = true)
+@@ -536,6 +554,12 @@ private fun ChromeStyleTabItem(
+                 Spacer(modifier = Modifier.width(tabContentEndPadding))
+             }
+         }
++
++        TabStripTabMenu(
++            expanded = isMenuShown,
++            menuItems = { tabStripTabMenuItems(state, hasOtherTabs, menuActions, onClose = closeTab) },
++            onDismissRequest = onDismissMenu,
++        )
+     }
+ }
+ 
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
+index 91f7571e..7aacb0c8 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
+@@ -66,6 +66,8 @@ import androidx.compose.ui.unit.dp
+ import androidx.core.text.BidiFormatter
+ import kotlinx.coroutines.flow.map
+ import mozilla.components.browser.state.action.TabListAction
++import mozilla.components.browser.state.selector.findTab
++import mozilla.components.browser.state.selector.getNormalOrPrivateTabs
+ import mozilla.components.browser.state.state.createTab
+ import mozilla.components.browser.state.store.BrowserStore
+ import mozilla.components.compose.base.button.IconButton
+@@ -75,6 +77,7 @@ import mozilla.components.compose.base.theme.Theme
+ import mozilla.components.compose.base.theme.ThemedValue
+ import mozilla.components.compose.base.theme.ThemedValueProvider
+ import mozilla.components.concept.engine.utils.ABOUT_HOME_URL
++import mozilla.components.feature.session.SessionUseCases
+ import mozilla.components.feature.tabs.TabsUseCases
+ import mozilla.components.support.utils.KeyboardState
+ import mozilla.components.support.utils.keyboardAsState
+@@ -112,9 +115,11 @@ private val tabStripIconSize
+  * @param browserStore The [BrowserStore] instance used to observe tabs state.
+  * @param appStore The [AppStore] instance used to observe browsing mode.
+  * @param tabsUseCases The [TabsUseCases] instance to perform tab actions.
++ * @param sessionUseCases The [SessionUseCases] instance to reload tabs.
+  * @param hideWhenKeyboardShown Whether or not to hide the tabs strip when the keyboard is shown.
+  * @param onAddTabClick Invoked when the add tab button is clicked.
+  * @param onCloseTabClick Invoked when a tab is closed.
++ * @param onCloseTabsClick Invoked when several tabs are closed at once (from the menu of a tab), with their number.
+  * @param onLastTabClose Invoked when the last remaining open tab is closed.
+  * @param onSelectedTabClick Invoked when a tab is selected.
+  * @param onTabCounterClick Invoked when tab counter is clicked.
+@@ -127,9 +132,11 @@ fun TabStrip(
+     browserStore: BrowserStore = components.core.store,
+     appStore: AppStore = components.appStore,
+     tabsUseCases: TabsUseCases = components.useCases.tabsUseCases,
++    sessionUseCases: SessionUseCases = components.useCases.sessionUseCases,
+     hideWhenKeyboardShown: Boolean,
+     onAddTabClick: () -> Unit,
+     onCloseTabClick: (isPrivate: Boolean) -> Unit,
++    onCloseTabsClick: (count: Int) -> Unit = {},
+     onLastTabClose: (isPrivate: Boolean) -> Unit,
+     onSelectedTabClick: (url: String) -> Unit,
+     onTabCounterClick: () -> Unit,
+@@ -198,10 +205,35 @@ fun TabStrip(
+             onSelectedTabClick = createSelectedTabClickHandler(tabsUseCases, onSelectedTabClick),
+             onMove = createMoveTabHandler(tabsUseCases),
+             onTabCounterClick = onTabCounterClick,
++            tabMenuActions =
++                TabStripTabMenuActions(
++                    onReload = { tabId -> sessionUseCases.reload(tabId) },
++                    onCloseOthers =
++                        createCloseOtherTabsHandler(browserStore, tabsUseCases, onSelectedTabClick, onCloseTabsClick),
++                ),
+         )
+     }
+ }
+ 
++private fun createCloseOtherTabsHandler(
++    browserStore: BrowserStore,
++    tabsUseCases: TabsUseCases,
++    onSelectedTabClick: (url: String) -> Unit,
++    onCloseTabsClick: (count: Int) -> Unit,
++): (tabId: String, isPrivate: Boolean) -> Unit = { tabId, isPrivate ->
++    val tab = browserStore.state.findTab(tabId)
++    val otherTabIds = browserStore.state.getNormalOrPrivateTabs(isPrivate).map { it.id }.filter { it != tabId }
++    if (tab != null && otherTabIds.isNotEmpty()) {
++        // The tab stays selected (or becomes so) instead of the closest one.
++        if (browserStore.state.selectedTabId != tabId) {
++            tabsUseCases.selectTab(tabId)
++            onSelectedTabClick(tab.content.url)
++        }
++        tabsUseCases.removeTabs(otherTabIds)
++        onCloseTabsClick(otherTabIds.size)
++    }
++}
++
+ private fun createAddTabClickHandler(onAddTabClick: () -> Unit): () -> Unit = {
+     onAddTabClick()
+     TabStripMetrics.newTabTapped.record()
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripTabMenu.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripTabMenu.kt
+new file mode 100644
+index 00000000..06b0b527
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripTabMenu.kt
+@@ -0,0 +1,75 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.browser.tabstrip
++
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.remember
++import mozilla.components.compose.base.menu.DropdownMenu
++import mozilla.components.compose.base.menu.MenuItem
++import mozilla.components.compose.base.text.Text
++import org.mozilla.fenix.R
++import org.mozilla.fenix.patchfeatures.PatchFeatureHooks
++import org.mozilla.fenix.patchfeatures.TabStripMenuTab
++
++/**
++ * Actions of the menu of a tab in the tab strip, shown by a long press on the tab like in Chrome (dragging the tab
++ * closes it and moves the tab instead).
++ *
++ * @property onReload Invoked when the tab is reloaded.
++ * @property onCloseOthers Invoked when the other tabs (normal or private, like the tab) are closed.
++ */
++internal data class TabStripTabMenuActions(
++    val onReload: (tabId: String) -> Unit,
++    val onCloseOthers: (tabId: String, isPrivate: Boolean) -> Unit,
++)
++
++/**
++ * Returns the items of the menu of [tab]: the basic ones, then the ones added by the optional features of the patch
++ * (see [PatchFeatureHooks.tabStripMenuItems]).
++ *
++ * @param tab The tab.
++ * @param hasOtherTabs Whether the tab strip shows other tabs than [tab].
++ * @param actions The actions of the basic items.
++ * @param onClose Invoked to close the tab (with the closing animation of the tab strip).
++ */
++internal fun tabStripTabMenuItems(
++    tab: TabStripItem,
++    hasOtherTabs: Boolean,
++    actions: TabStripTabMenuActions,
++    onClose: () -> Unit,
++): List<MenuItem> =
++    listOf(
++        MenuItem.TextItem(text = Text.Resource(R.string.browser_menu_refresh)) { actions.onReload(tab.id) },
++        MenuItem.TextItem(text = Text.Resource(R.string.close_tab), onClick = onClose),
++        MenuItem.TextItem(
++            text = Text.Resource(R.string.tab_strip_menu_close_other_tabs),
++            enabled = hasOtherTabs,
++        ) {
++            actions.onCloseOthers(tab.id, tab.isPrivate)
++        },
++    ) + PatchFeatureHooks.all.flatMap { it.tabStripMenuItems(TabStripMenuTab(tab.id, tab.isPrivate)) }
++
++/**
++ * Menu of a tab in the tab strip, anchored to the tab.
++ *
++ * @param expanded Whether the menu is shown.
++ * @param menuItems Returns the items of the menu, see [tabStripTabMenuItems]. Only invoked while the menu is shown.
++ * @param onDismissRequest Invoked when the menu is closed.
++ */
++@Composable
++internal fun TabStripTabMenu(
++    expanded: Boolean,
++    menuItems: () -> List<MenuItem>,
++    onDismissRequest: () -> Unit,
++) {
++    // While the menu closes, it keeps showing the items it was showing.
++    val shownItems = remember { arrayOfNulls<List<MenuItem>>(1) }
++    val items = if (expanded) menuItems().also { shownItems[0] = it } else shownItems[0].orEmpty()
++    DropdownMenu(
++        menuItems = items,
++        expanded = expanded,
++        onDismissRequest = onDismissRequest,
++    )
++}
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt
+index 1312a62f..eb50448e 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt
+@@ -119,6 +119,7 @@ import org.mozilla.fenix.ext.nav
+ import org.mozilla.fenix.ext.recordEventInNimbus
+ import org.mozilla.fenix.ext.requireComponents
+ import org.mozilla.fenix.ext.tabClosedUndoMessage
++import org.mozilla.fenix.ext.tabsClosedUndoMessage
+ import org.mozilla.fenix.home.bookmarks.BookmarksFeature
+ import org.mozilla.fenix.home.bookmarks.controller.DefaultBookmarksController
+ import org.mozilla.fenix.home.collections.migration.CollectionsMigrationCardAction
+@@ -995,6 +996,7 @@ class HomeFragment : Fragment(), UserInteractionHandler, OnLongPressedListener {
+                 onCloseTabClick = { isPrivate ->
+                     showUndoSnackbar(requireContext().tabClosedUndoMessage(isPrivate))
+                 },
++                onCloseTabsClick = { count -> showUndoSnackbar(requireContext().tabsClosedUndoMessage(count)) },
+                 onTabCounterClick = { openTabsTray() },
+             )
+         }
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
+new file mode 100644
+index 00000000..2ddccc8d
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
+@@ -0,0 +1,142 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import mozilla.components.compose.base.menu.MenuItem
++import org.json.JSONArray
++import org.json.JSONException
++import org.json.JSONObject
++import java.util.Locale
++
++private const val DEFAULT_LANGUAGE = "en"
++
++/**
++ * An optional feature of the patch with the Chrome-like tab strip (see `chrome-tabstrip/patches/series`). Each one has
++ * its own patch: when it doesn't apply or compile on a new version of Firefox, the GitHub build leaves it out and
++ * publishes the release anyway, telling which features are missing.
++ *
++ * @property id The identifier of the feature: the name of its patch without number, e.g. "tab-groups".
++ * @property names The name of the feature shown to the user, by language (e.g. "it", "en").
++ */
++data class PatchFeature(
++    val id: String,
++    val names: Map<String, String>,
++) {
++    /** Returns the name of the feature in the language of [locale], in English if it isn't translated. */
++    fun name(locale: Locale): String =
++        names[locale.language] ?: names[DEFAULT_LANGUAGE] ?: names.values.firstOrNull() ?: id
++}
++
++/**
++ * The optional features of a build of the patch.
++ *
++ * @property included The features included in the build.
++ * @property missing The features left out of the build, because their patch didn't apply or compile.
++ */
++data class PatchFeatures(
++    val included: List<PatchFeature>,
++    val missing: List<PatchFeature>,
++) {
++    companion object {
++        /** The optional features of this build, written by `apply.sh` when the patches were applied. */
++        val current: PatchFeatures
++            get() = PatchFeatures(GeneratedPatchFeatures.included, GeneratedPatchFeatures.missing)
++
++        /**
++         * Reads the features of a release from its `update.json` (see `ci-update-info.sh`), or returns `null` if it
++         * doesn't describe them (a release published before the patch was split in optional features).
++         */
++        fun fromJson(json: JSONObject): PatchFeatures? =
++            try {
++                if (!json.has("features") || !json.has("missingFeatures")) {
++                    null
++                } else {
++                    PatchFeatures(
++                        included = json.getJSONArray("features").toFeatures(),
++                        missing = json.getJSONArray("missingFeatures").toFeatures(),
++                    )
++                }
++            } catch (e: JSONException) {
++                null
++            }
++
++        private fun JSONArray.toFeatures() =
++            List(length()) { i ->
++                val feature = getJSONObject(i)
++                val names = feature.getJSONObject("name")
++                PatchFeature(
++                    id = feature.getString("id"),
++                    names = names.keys().asSequence().associateWith { names.getString(it) },
++                )
++            }
++    }
++}
++
++/**
++ * How the optional features of an update differ from the ones of the installed build.
++ *
++ * @property lost The features of the installed build that the update doesn't include.
++ * @property missing The other features that the update doesn't include: the installed build doesn't have them either.
++ * @property restored The features missing from the installed build that the update includes again.
++ */
++data class PatchFeatureChanges(
++    val lost: List<PatchFeature> = emptyList(),
++    val missing: List<PatchFeature> = emptyList(),
++    val restored: List<PatchFeature> = emptyList(),
++) {
++    /** Whether the update leaves out some features. */
++    val isIncomplete: Boolean
++        get() = lost.isNotEmpty() || missing.isNotEmpty()
++
++    companion object {
++        /**
++         * Compares the features of the [installed] build with the ones of an [update]. An update that doesn't describe
++         * its features (`null`) is considered complete.
++         */
++        fun between(
++            installed: PatchFeatures,
++            update: PatchFeatures?,
++        ): PatchFeatureChanges {
++            if (update == null) return PatchFeatureChanges()
++            val installedIds = installed.included.mapTo(HashSet()) { it.id }
++            val updateIds = update.included.mapTo(HashSet()) { it.id }
++            val (lost, missing) = update.missing.partition { it.id in installedIds }
++            return PatchFeatureChanges(
++                lost = lost,
++                missing = missing,
++                restored = installed.missing.filter { it.id in updateIds },
++            )
++        }
++    }
++}
++
++/**
++ * The tab whose menu is shown in the tab strip.
++ *
++ * @property id The id of the tab.
++ * @property isPrivate Whether it's a private tab.
++ */
++data class TabStripMenuTab(
++    val id: String,
++    val isPrivate: Boolean,
++)
++
++/**
++ * Entry point of an optional feature, which the code of the mandatory patches calls (see [all]): every optional patch
++ * defines an object implementing it, named after the patch (e.g. `TabGroupsFeature` for `0080-tab-groups.patch`).
++ *
++ * Optional features hook into Firefox only through these methods, so that each optional patch applies and compiles
++ * whichever other optional patches are left out. Every method does nothing unless the feature overrides it.
++ */
++interface PatchFeatureHooks {
++    /** Items the feature adds to the menu of [tab] in the tab strip (long press, or right click). */
++    fun tabStripMenuItems(tab: TabStripMenuTab): List<MenuItem> = emptyList()
++
++    companion object {
++        /** The entry points of the optional features included in this build. */
++        val all: List<PatchFeatureHooks>
++            get() = GeneratedPatchFeatures.hooks
++    }
++}
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeaturesDialog.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeaturesDialog.kt
+new file mode 100644
+index 00000000..2c1fdae5
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeaturesDialog.kt
+@@ -0,0 +1,43 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import android.content.Context
++import androidx.core.os.ConfigurationCompat
++import com.google.android.material.dialog.MaterialAlertDialogBuilder
++import org.mozilla.fenix.R
++import java.util.Locale
++
++/**
++ * Title of the item of the About page listing the optional features of this build (see [showPatchFeaturesDialog]),
++ * with a warning when some are missing, or `null` if the patch has no optional features.
++ */
++fun patchFeaturesAboutTitle(context: Context): String? {
++    val features = PatchFeatures.current
++    if (features.included.isEmpty() && features.missing.isEmpty()) return null
++    val title = context.getString(R.string.patch_features_title)
++    return if (features.missing.isEmpty()) title else "$title ⚠️"
++}
++
++/** Shows the optional features of the patch included in this build, and the missing ones. */
++fun showPatchFeaturesDialog(context: Context) {
++    val features = PatchFeatures.current
++    val locale = ConfigurationCompat.getLocales(context.resources.configuration)[0] ?: Locale.getDefault()
++    fun List<PatchFeature>.bulletList() = joinToString("\n") { "• ${it.name(locale)}" }
++    val message =
++        listOfNotNull(
++            features.included.takeIf { it.isNotEmpty() }?.let {
++                context.getString(R.string.patch_features_included, it.bulletList())
++            },
++            features.missing.takeIf { it.isNotEmpty() }?.let {
++                context.getString(R.string.patch_features_missing, it.bulletList())
++            },
++        ).joinToString("\n\n")
++    MaterialAlertDialogBuilder(context)
++        .setTitle(R.string.patch_features_title)
++        .setMessage(message)
++        .setPositiveButton(android.R.string.ok, null)
++        .show()
++}
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt
+index 878e7d62..3ca1758d 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt
+@@ -17,6 +17,7 @@ import android.widget.Toast
+ import androidx.annotation.VisibleForTesting
+ import androidx.appcompat.app.AppCompatActivity
+ import androidx.core.content.FileProvider
++import androidx.core.os.ConfigurationCompat
+ import androidx.core.content.edit
+ import androidx.core.content.pm.PackageInfoCompat
+ import androidx.lifecycle.DefaultLifecycleObserver
+@@ -34,10 +35,14 @@ import mozilla.components.support.base.log.logger.Logger
+ import org.json.JSONException
+ import org.json.JSONObject
+ import org.mozilla.fenix.R
++import org.mozilla.fenix.patchfeatures.PatchFeature
++import org.mozilla.fenix.patchfeatures.PatchFeatureChanges
++import org.mozilla.fenix.patchfeatures.PatchFeatures
+ import java.io.File
+ import java.io.IOException
+ import java.net.HttpURLConnection
+ import java.net.URL
++import java.util.Locale
+ 
+ /**
+  * Where the GitHub Releases of the patch publish the description of the latest release (see [SelfUpdateInfo]). A fork
+@@ -55,6 +60,7 @@ private const val DIALOG_PADDING_DP = 24
+ 
+ private const val PREFERENCES_NAME = "chrome_tabstrip_self_update"
+ private const val PREF_LAST_CHECK = "last_check"
++private const val PREF_SKIPPED_VERSION_CODE = "skipped_version_code"
+ 
+ // In the cache directory, which the app file provider shares (see res/xml/file_paths.xml).
+ private const val UPDATE_DIRECTORY = "self-update"
+@@ -68,6 +74,8 @@ private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
+  * @property versionCode The Android version code of the published APK.
+  * @property apkUrl Where to download the APK from.
+  * @property signingCertSha256 The SHA-256 digest of the certificate the APK is signed with, in lowercase hexadecimal.
++ * @property features The optional features of the patch included in the release and the missing ones, or `null` if
++ *   the release doesn't describe them (published before the patch was split in optional features).
+  */
+ data class SelfUpdateInfo(
+     val packageName: String,
+@@ -75,6 +83,7 @@ data class SelfUpdateInfo(
+     val versionCode: Long,
+     val apkUrl: String,
+     val signingCertSha256: String,
++    val features: PatchFeatures? = null,
+ ) {
+     /**
+      * Whether Android can install this release on top of the installed app: same app, signed with the same key.
+@@ -122,6 +131,7 @@ data class SelfUpdateInfo(
+                         versionCode = info.getLong("versionCode"),
+                         apkUrl = apkUrl,
+                         signingCertSha256 = certificate,
++                        features = PatchFeatures.fromJson(info),
+                     )
+                 }
+             } catch (e: JSONException) {
+@@ -158,6 +168,9 @@ internal fun isCheckDue(
+  * update: the APK is then downloaded and handed over to the Android package installer, which asks for a last
+  * confirmation (and, the first time, to allow Firefox to install apps).
+  *
++ * The question also tells which optional features of the patch the release leaves out, if any (see
++ * [PatchFeatureChanges]): the user can then skip that release, which isn't offered again by the daily check.
++ *
+  * Builds that can't be updated from the releases (local builds signed with another key, other variants like Nightly or
+  * debug) are never offered an update. The user can also look for an update right away (see [checkNow]).
+  *
+@@ -185,7 +198,9 @@ class SelfUpdater(
+         job =
+             activity.lifecycleScope.launch {
+                 val result = check()
+-                if (result is CheckResult.Available) {
++                if (result is CheckResult.Available &&
++                    result.update.versionCode != preferences.getLong(PREF_SKIPPED_VERSION_CODE, -1L)
++                ) {
+                     activity.withResumed { askToUpdate(result.update) }
+                 }
+             }
+@@ -265,23 +280,48 @@ class SelfUpdater(
+         }
+ 
+     private fun askToUpdate(update: SelfUpdateInfo) {
++        val changes = PatchFeatureChanges.between(PatchFeatures.current, update.features)
++        val message =
++            activity.getString(
++                R.string.self_update_available_message,
++                activity.getString(R.string.app_name),
++                displayVersion(update.versionName),
++                displayVersion(installedPackageInfo()?.versionName.orEmpty()),
++            )
+         MaterialAlertDialogBuilder(activity)
+             .setTitle(R.string.self_update_available_title)
+-            .setMessage(
+-                activity.getString(
+-                    R.string.self_update_available_message,
+-                    activity.getString(R.string.app_name),
+-                    displayVersion(update.versionName),
+-                    displayVersion(installedPackageInfo()?.versionName.orEmpty()),
+-                ),
+-            )
++            .setMessage(listOf(message).plus(describe(changes)).joinToString("\n\n"))
+             .setPositiveButton(R.string.self_update_update) { _, _ -> downloadAndInstall(update) }
+             .setNegativeButton(R.string.self_update_later, null)
++            .apply {
++                if (changes.isIncomplete) {
++                    setNeutralButton(R.string.self_update_skip) { _, _ ->
++                        preferences.edit { putLong(PREF_SKIPPED_VERSION_CODE, update.versionCode) }
++                    }
++                }
++            }
+             // Only the buttons close it, so that it isn't dismissed by mistake.
+             .setCancelable(false)
+             .show()
+     }
+ 
++    /** Describes to the user how the optional features of an update differ from the installed ones. */
++    private fun describe(changes: PatchFeatureChanges): List<String> {
++        val locale = ConfigurationCompat.getLocales(activity.resources.configuration)[0] ?: Locale.getDefault()
++        fun List<PatchFeature>.bulletList() = joinToString("\n") { "• ${it.name(locale)}" }
++        return listOfNotNull(
++            changes.lost.takeIf { it.isNotEmpty() }?.let {
++                activity.getString(R.string.self_update_lost_features, it.bulletList())
++            },
++            changes.missing.takeIf { it.isNotEmpty() }?.let {
++                activity.getString(R.string.self_update_missing_features, it.bulletList())
++            },
++            changes.restored.takeIf { it.isNotEmpty() }?.let {
++                activity.getString(R.string.self_update_restored_features, it.bulletList())
++            },
++        )
++    }
++
+     private fun downloadAndInstall(update: SelfUpdateInfo) {
+         val progressBar =
+             ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply {
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutFragment.kt
+index 53cfe207..4ddc0057 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutFragment.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutFragment.kt
+@@ -29,6 +29,8 @@ import org.mozilla.fenix.ext.components
+ import org.mozilla.fenix.ext.openToBrowser
+ import org.mozilla.fenix.ext.requireComponents
+ import org.mozilla.fenix.ext.showToolbar
++import org.mozilla.fenix.patchfeatures.patchFeaturesAboutTitle
++import org.mozilla.fenix.patchfeatures.showPatchFeaturesDialog
+ import org.mozilla.fenix.selfupdate.SelfUpdater
+ import org.mozilla.fenix.settings.SupportUtils
+ import org.mozilla.fenix.settings.about.AboutItemType.LICENSING_INFO
+@@ -196,8 +198,9 @@ class AboutFragment(private val toastHandler: ToastHandler = DefaultToastHandler
+     private fun populateAboutList(): List<AboutPageItem> {
+         val context = requireContext()
+ 
+-        return listOf(
++        return listOfNotNull(
+             AboutPageItem(AboutItem.CheckForUpdates, getString(R.string.self_update_check)),
++            patchFeaturesAboutTitle(context)?.let { AboutPageItem(AboutItem.PatchFeatureList, it) },
+             AboutPageItem(
+                 AboutItem.ExternalLink(
+                     WHATS_NEW,
+@@ -281,6 +284,9 @@ class AboutFragment(private val toastHandler: ToastHandler = DefaultToastHandler
+             is AboutItem.CheckForUpdates -> {
+                 SelfUpdater(requireActivity() as AppCompatActivity).checkNow()
+             }
++            is AboutItem.PatchFeatureList -> {
++                showPatchFeaturesDialog(requireContext())
++            }
+         }
+     }
+ 
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutItem.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutItem.kt
+index ecb5890d..a2499159 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutItem.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutItem.kt
+@@ -13,6 +13,9 @@ sealed class AboutItem {
+ 
+     /** Looks for an update of the build with the Chrome-like tab strip, from its GitHub Releases. */
+     object CheckForUpdates : AboutItem()
++
++    /** Lists the optional features of the patch with the Chrome-like tab strip included in this build. */
++    object PatchFeatureList : AboutItem()
+ }
+ 
+ enum class AboutItemType {
+diff --git a/mobile/android/fenix/app/src/main/res/values-it/patch_features_strings.xml b/mobile/android/fenix/app/src/main/res/values-it/patch_features_strings.xml
+new file mode 100644
+index 00000000..f180679a
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/res/values-it/patch_features_strings.xml
+@@ -0,0 +1,14 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++<resources>
++    <string name="self_update_lost_features">⚠️ Questa versione non include alcune funzioni della patch che hai nella versione installata:\n%1$s\nTorneranno con un aggiornamento successivo.</string>
++    <string name="self_update_missing_features">Funzioni della patch non incluse in questa versione (non le hai nemmeno ora):\n%1$s</string>
++    <string name="self_update_restored_features">Questa versione ripristina:\n%1$s</string>
++    <string name="self_update_skip">Salta questa versione</string>
++    <string name="patch_features_title">Funzioni della patch</string>
++    <string name="patch_features_included">Incluse in questa versione:\n%1$s</string>
++    <string name="patch_features_missing">⚠️ Non incluse in questa versione, perché la loro patch non si applica o non compila su questa versione di Firefox:\n%1$s\nTorneranno con un aggiornamento successivo.</string>
++    <string name="tab_strip_menu_close_other_tabs">Chiudi le altre schede</string>
++</resources>
+diff --git a/mobile/android/fenix/app/src/main/res/values/patch_features_strings.xml b/mobile/android/fenix/app/src/main/res/values/patch_features_strings.xml
+new file mode 100644
+index 00000000..ab8ad0fe
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/res/values/patch_features_strings.xml
+@@ -0,0 +1,28 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++<!-- Optional features of the patch with the Chrome-like tab strip, and the menu of the tabs in the tab strip. Only
++     translated in Italian. -->
++<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
++    <!-- Part of the message of the update dialog, when the update leaves out optional features of the patch that the
++         installed version has. %1$s is the list of the features, one per line. -->
++    <string name="self_update_lost_features">⚠️ This version doesn’t include some features of the patch that you have in the installed version:\n%1$s\nThey’ll come back with a later update.</string>
++    <!-- Part of the message of the update dialog, when the update leaves out optional features of the patch that the
++         installed version doesn't have either. %1$s is the list of the features, one per line. -->
++    <string name="self_update_missing_features">Features of the patch not included in this version (you don’t have them now either):\n%1$s</string>
++    <!-- Part of the message of the update dialog, when the update includes again optional features of the patch
++         missing from the installed version. %1$s is the list of the features, one per line. -->
++    <string name="self_update_restored_features">This version brings back:\n%1$s</string>
++    <!-- Button of the update dialog, shown when the update leaves out some features: the update is no longer offered
++         by the daily check. -->
++    <string name="self_update_skip">Skip this version</string>
++    <!-- Item of the About page listing the optional features of the patch included in this version. -->
++    <string name="patch_features_title">Patch features</string>
++    <!-- Part of the dialog of the optional features of the patch. %1$s is the list of the features, one per line. -->
++    <string name="patch_features_included">Included in this version:\n%1$s</string>
++    <!-- Part of the dialog of the optional features of the patch. %1$s is the list of the features, one per line. -->
++    <string name="patch_features_missing">⚠️ Not included in this version, because their patch doesn’t apply or compile on this version of Firefox:\n%1$s\nThey’ll come back with a later update.</string>
++    <!-- Item of the menu of a tab in the tab strip, closing all the other tabs (normal or private, like the tab). -->
++    <string name="tab_strip_menu_close_other_tabs">Close other tabs</string>
++</resources>
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/TabStripTabMenuTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/TabStripTabMenuTest.kt
+new file mode 100644
+index 00000000..c426113b
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/TabStripTabMenuTest.kt
+@@ -0,0 +1,62 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.browser.tabstrip
++
++import mozilla.components.compose.base.menu.MenuItem
++import mozilla.components.compose.base.text.Text
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import org.mozilla.fenix.R
++import org.mozilla.fenix.patchfeatures.PatchFeatureHooks
++import org.mozilla.fenix.patchfeatures.TabStripMenuTab
++
++class TabStripTabMenuTest {
++    private val tab =
++        TabStripItem(id = "tab", title = "Title", url = "https://example.com", isPrivate = true, isSelected = false)
++
++    private val reloaded = mutableListOf<String>()
++    private val closedOthers = mutableListOf<Pair<String, Boolean>>()
++    private var closeCount = 0
++    private val actions =
++        TabStripTabMenuActions(
++            onReload = { reloaded += it },
++            onCloseOthers = { tabId, isPrivate -> closedOthers += tabId to isPrivate },
++        )
++
++    private fun items(hasOtherTabs: Boolean = true) =
++        tabStripTabMenuItems(tab, hasOtherTabs, actions, onClose = { closeCount++ }).map { it as MenuItem.TextItem }
++
++    @Test
++    fun `WHEN the menu of a tab is built THEN it has the basic items, then the ones of the optional features`() {
++        val items = items()
++
++        assertEquals(
++            listOf(R.string.browser_menu_refresh, R.string.close_tab, R.string.tab_strip_menu_close_other_tabs),
++            items.take(3).map { (it.text as Text.Resource).value },
++        )
++        val featureItems = PatchFeatureHooks.all.sumOf { it.tabStripMenuItems(TabStripMenuTab("tab", true)).size }
++        assertEquals(3 + featureItems, items.size)
++    }
++
++    @Test
++    fun `WHEN an item of the menu is clicked THEN its action is invoked for the tab`() {
++        val (reload, close, closeOthers) = items()
++
++        reload.onClick()
++        close.onClick()
++        closeOthers.onClick()
++
++        assertEquals(listOf("tab"), reloaded)
++        assertEquals(1, closeCount)
++        assertEquals(listOf("tab" to true), closedOthers)
++    }
++
++    @Test
++    fun `GIVEN the only tab of the strip WHEN its menu is built THEN the other tabs can't be closed`() {
++        assertTrue(items(hasOtherTabs = true)[2].enabled)
++        assertFalse(items(hasOtherTabs = false)[2].enabled)
++    }}
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/PatchFeaturesTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/PatchFeaturesTest.kt
+new file mode 100644
+index 00000000..a0222919
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/PatchFeaturesTest.kt
+@@ -0,0 +1,115 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import org.json.JSONObject
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.mozilla.fenix.selfupdate.SelfUpdateInfo
++import org.robolectric.RobolectricTestRunner
++import java.util.Locale
++
++@RunWith(RobolectricTestRunner::class)
++class PatchFeaturesTest {
++    private val tabGroups = feature("tab-groups", "Gruppi di schede", "Tab groups")
++    private val pageZoom = feature("page-zoom", "Zoom della pagina", "Page zoom")
++    private val tabAudio = feature("tab-audio", "Icona audio", "Tab audio")
++
++    private fun feature(
++        id: String,
++        italian: String,
++        english: String,
++    ) = PatchFeature(id = id, names = mapOf("it" to italian, "en" to english))
++
++    @Test
++    fun `GIVEN a feature WHEN its name is asked THEN it is in the language of the locale, or in English`() {
++        assertEquals("Gruppi di schede", tabGroups.name(Locale.ITALIAN))
++        assertEquals("Tab groups", tabGroups.name(Locale.ENGLISH))
++        assertEquals("Tab groups", tabGroups.name(Locale.GERMAN))
++        assertEquals("only", PatchFeature("only", mapOf("it" to "only")).name(Locale.GERMAN))
++        assertEquals("no-names", PatchFeature("no-names", emptyMap()).name(Locale.GERMAN))
++    }
++
++    @Test
++    fun `GIVEN an update json describing the features WHEN parsed THEN the features are returned`() {
++        val json =
++            JSONObject(
++                """
++                {
++                  "features": [{ "id": "page-zoom", "name": { "it": "Zoom della pagina", "en": "Page zoom" } }],
++                  "missingFeatures": [{ "id": "tab-groups", "name": { "it": "Gruppi di schede", "en": "Tab groups" } }]
++                }
++                """,
++            )
++
++        assertEquals(
++            PatchFeatures(included = listOf(pageZoom), missing = listOf(tabGroups)),
++            PatchFeatures.fromJson(json),
++        )
++    }
++
++    @Test
++    fun `GIVEN an update json that doesn't describe the features WHEN parsed THEN there are no features`() {
++        assertNull(PatchFeatures.fromJson(JSONObject("""{ "versionCode": 1 }""")))
++        assertNull(PatchFeatures.fromJson(JSONObject("""{ "features": [], "missingFeatures": [{ "id": 1 }] }""")))
++        assertNull(PatchFeatures.fromJson(JSONObject("""{ "features": "none", "missingFeatures": [] }""")))
++    }
++
++    @Test
++    fun `GIVEN the update json of a release WHEN parsed THEN its features are part of the update`() {
++        val update =
++            SelfUpdateInfo.fromJson(
++                """
++                {
++                  "packageName": "org.mozilla.firefox",
++                  "versionName": "159.0",
++                  "versionCode": 2017000000,
++                  "apkUrl": "https://github.com/owner/repo/releases/download/tag/firefox.apk",
++                  "signingCertSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
++                  "features": [],
++                  "missingFeatures": [{ "id": "tab-groups", "name": { "it": "Gruppi di schede", "en": "Tab groups" } }]
++                }
++                """,
++            )
++
++        assertEquals(PatchFeatures(included = emptyList(), missing = listOf(tabGroups)), update?.features)
++    }
++
++    @Test
++    fun `GIVEN an update without some features WHEN compared THEN the lost ones are told apart from the others`() {
++        val installed = PatchFeatures(included = listOf(tabGroups, pageZoom), missing = listOf(tabAudio))
++        val update = PatchFeatures(included = listOf(pageZoom), missing = listOf(tabGroups, tabAudio))
++
++        val changes = PatchFeatureChanges.between(installed, update)
++
++        assertEquals(PatchFeatureChanges(lost = listOf(tabGroups), missing = listOf(tabAudio)), changes)
++        assertTrue(changes.isIncomplete)
++    }
++
++    @Test
++    fun `GIVEN an update including features missing from the installed build WHEN compared THEN they are restored`() {
++        val installed = PatchFeatures(included = listOf(pageZoom), missing = listOf(tabGroups, tabAudio))
++        val update = PatchFeatures(included = listOf(pageZoom, tabGroups, tabAudio), missing = emptyList())
++
++        val changes = PatchFeatureChanges.between(installed, update)
++
++        assertEquals(PatchFeatureChanges(restored = listOf(tabGroups, tabAudio)), changes)
++        assertFalse(changes.isIncomplete)
++    }
++
++    @Test
++    fun `GIVEN an update that doesn't describe its features WHEN compared THEN it is complete`() {
++        val installed = PatchFeatures(included = listOf(pageZoom), missing = listOf(tabGroups))
++
++        val changes = PatchFeatureChanges.between(installed, update = null)
++
++        assertEquals(PatchFeatureChanges(), changes)
++        assertFalse(changes.isIncomplete)
++    }
++}
