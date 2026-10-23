@@ -248,7 +248,7 @@ index 00000000..802815b9
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PageZoomFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PageZoomFeature.kt
 new file mode 100644
-index 00000000..c06382e9
+index 00000000..9f8a83d2
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PageZoomFeature.kt
 @@ -0,0 +1,309 @@
@@ -441,11 +441,11 @@ index 00000000..c06382e9
 +                entries = PAGE_ZOOM_LEVELS.map { context.getString(R.string.page_zoom_percent, it) }.toTypedArray()
 +                entryValues = levels
 +                value = state.value.defaultZoom.toString()
-+                summary = context.getString(R.string.page_zoom_percent, state.value.defaultZoom)
-+                setOnPreferenceChangeListener { preference, newValue ->
-+                    val zoom = (newValue as String).toInt()
-+                    update { it.copy(defaultZoom = zoom) }
-+                    preference.summary = context.getString(R.string.page_zoom_percent, zoom)
++                // The summary is the chosen entry, e.g. "100 %": a summary set as text would be a format string for
++                // ListPreference, which crashes on its "%".
++                summaryProvider = ListPreference.SimpleSummaryProvider.getInstance()
++                setOnPreferenceChangeListener { _, newValue ->
++                    update { it.copy(defaultZoom = (newValue as String).toInt()) }
 +                    true
 +                }
 +            },

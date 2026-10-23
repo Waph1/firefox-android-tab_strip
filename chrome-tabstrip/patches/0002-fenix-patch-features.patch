@@ -1832,6 +1832,65 @@ index 00000000..c426113b
 +        assertTrue(items(hasOtherTabs = true)[2].enabled)
 +        assertFalse(items(hasOtherTabs = false)[2].enabled)
 +    }}
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/CustomizationPreferencesTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/CustomizationPreferencesTest.kt
+new file mode 100644
+index 00000000..6a306e57
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/CustomizationPreferencesTest.kt
+@@ -0,0 +1,53 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import android.os.Looper
++import androidx.appcompat.app.AppCompatActivity
++import io.mockk.every
++import mozilla.components.browser.state.store.BrowserStore
++import mozilla.components.support.test.robolectric.testContext
++import org.junit.Assert.assertTrue
++import org.junit.Before
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.mozilla.fenix.R
++import org.mozilla.fenix.components.AppStore
++import org.mozilla.fenix.ext.components
++import org.mozilla.fenix.settings.CustomizationFragment
++import org.mozilla.fenix.settings.CustomizationFragmentArgs
++import org.robolectric.Robolectric
++import org.robolectric.RobolectricTestRunner
++import org.robolectric.Shadows.shadowOf
++
++@RunWith(RobolectricTestRunner::class)
++class CustomizationPreferencesTest {
++    @Before
++    fun setup() {
++        every { testContext.components.core.store } returns BrowserStore()
++        every { testContext.components.appStore } returns AppStore()
++    }
++
++    @Test
++    fun `WHEN showing Settings - Customize THEN each preference, also of the optional features, can be shown`() {
++        val activity =
++            Robolectric.buildActivity(AppCompatActivity::class.java)
++                .apply { get().setTheme(R.style.NormalTheme) }
++                .setup()
++                .get()
++        val fragment = CustomizationFragment().apply { arguments = CustomizationFragmentArgs().toBundle() }
++        activity.supportFragmentManager.beginTransaction().add(android.R.id.content, fragment).commitNow()
++        shadowOf(Looper.getMainLooper()).idle()
++
++        // Like scrolling to the end of the list: shows each preference, which is e.g. when a ListPreference formats
++        // its summary (a summary with a "%" crashed Firefox).
++        val listView = fragment.listView
++        val adapter = checkNotNull(listView.adapter)
++        assertTrue(adapter.itemCount > 0)
++        repeat(adapter.itemCount) { position ->
++            adapter.bindViewHolder(adapter.createViewHolder(listView, adapter.getItemViewType(position)), position)
++        }
++    }
++}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/PatchFeaturesTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/PatchFeaturesTest.kt
 new file mode 100644
 index 00000000..a0222919
