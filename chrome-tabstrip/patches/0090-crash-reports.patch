@@ -1,6 +1,6 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/CrashReports.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/CrashReports.kt
 new file mode 100644
-index 00000000..521a35ff
+index 00000000000..521a35ff714
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/CrashReports.kt
 @@ -0,0 +1,120 @@
@@ -126,7 +126,7 @@ index 00000000..521a35ff
 +private fun String.encoded(): String = URLEncoder.encode(this, "UTF-8")
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/CrashReportsFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/CrashReportsFeature.kt
 new file mode 100644
-index 00000000..da04d29a
+index 00000000000..da04d29a1e1
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/CrashReportsFeature.kt
 @@ -0,0 +1,158 @@
@@ -290,7 +290,7 @@ index 00000000..da04d29a
 +}
 diff --git a/mobile/android/fenix/app/src/main/res/values-it/crash_reports_strings.xml b/mobile/android/fenix/app/src/main/res/values-it/crash_reports_strings.xml
 new file mode 100644
-index 00000000..e8af313a
+index 00000000000..e8af313a7e0
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/res/values-it/crash_reports_strings.xml
 @@ -0,0 +1,9 @@
@@ -305,7 +305,7 @@ index 00000000..e8af313a
 +</resources>
 diff --git a/mobile/android/fenix/app/src/main/res/values/crash_reports_strings.xml b/mobile/android/fenix/app/src/main/res/values/crash_reports_strings.xml
 new file mode 100644
-index 00000000..8c3f31e0
+index 00000000000..8c3f31e0567
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/res/values/crash_reports_strings.xml
 @@ -0,0 +1,13 @@
@@ -324,7 +324,7 @@ index 00000000..8c3f31e0
 +</resources>
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/CrashReportsTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/CrashReportsTest.kt
 new file mode 100644
-index 00000000..7ee68612
+index 00000000000..7ee68612eeb
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/CrashReportsTest.kt
 @@ -0,0 +1,78 @@

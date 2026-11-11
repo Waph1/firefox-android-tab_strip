@@ -1,6 +1,6 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/KeyboardShortcuts.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/KeyboardShortcuts.kt
 new file mode 100644
-index 00000000..cc1509eb
+index 00000000000..cc1509eb534
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/KeyboardShortcuts.kt
 @@ -0,0 +1,201 @@
@@ -207,7 +207,7 @@ index 00000000..cc1509eb
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/KeyboardShortcutsFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/KeyboardShortcutsFeature.kt
 new file mode 100644
-index 00000000..2a20094a
+index 00000000000..2a20094a792
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/KeyboardShortcutsFeature.kt
 @@ -0,0 +1,234 @@
@@ -447,7 +447,7 @@ index 00000000..2a20094a
 +}
 diff --git a/mobile/android/fenix/app/src/main/res/values-it/keyboard_shortcuts_strings.xml b/mobile/android/fenix/app/src/main/res/values-it/keyboard_shortcuts_strings.xml
 new file mode 100644
-index 00000000..61f58152
+index 00000000000..61f58152552
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/res/values-it/keyboard_shortcuts_strings.xml
 @@ -0,0 +1,14 @@
@@ -467,7 +467,7 @@ index 00000000..61f58152
 +</resources>
 diff --git a/mobile/android/fenix/app/src/main/res/values/keyboard_shortcuts_strings.xml b/mobile/android/fenix/app/src/main/res/values/keyboard_shortcuts_strings.xml
 new file mode 100644
-index 00000000..63bf8d8f
+index 00000000000..63bf8d8fb4a
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/res/values/keyboard_shortcuts_strings.xml
 @@ -0,0 +1,24 @@
@@ -497,7 +497,7 @@ index 00000000..63bf8d8f
 +</resources>
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/KeyboardShortcutsTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/KeyboardShortcutsTest.kt
 new file mode 100644
-index 00000000..831c3008
+index 00000000000..831c3008a18
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/KeyboardShortcutsTest.kt
 @@ -0,0 +1,137 @@

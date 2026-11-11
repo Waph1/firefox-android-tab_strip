@@ -1,6 +1,6 @@
 diff --git a/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/background.js b/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/background.js
 new file mode 100644
-index 00000000..e4ba0ed5
+index 00000000000..e4ba0ed537d
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/background.js
 @@ -0,0 +1,55 @@
@@ -61,7 +61,7 @@ index 00000000..e4ba0ed5
 +});
 diff --git a/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/content.js b/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/content.js
 new file mode 100644
-index 00000000..c7a7db86
+index 00000000000..c7a7db86b46
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/content.js
 @@ -0,0 +1,42 @@
@@ -109,7 +109,7 @@ index 00000000..c7a7db86
 +});
 diff --git a/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/manifest.json b/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/manifest.json
 new file mode 100644
-index 00000000..4993a683
+index 00000000000..4993a68338f
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/assets/extensions/chrome-tabstrip-zoom/manifest.json
 @@ -0,0 +1,22 @@
@@ -137,7 +137,7 @@ index 00000000..4993a683
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PageZoom.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PageZoom.kt
 new file mode 100644
-index 00000000..802815b9
+index 00000000000..802815b9440
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PageZoom.kt
 @@ -0,0 +1,105 @@
@@ -248,7 +248,7 @@ index 00000000..802815b9
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PageZoomFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PageZoomFeature.kt
 new file mode 100644
-index 00000000..9f8a83d2
+index 00000000000..9f8a83d2324
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PageZoomFeature.kt
 @@ -0,0 +1,309 @@
@@ -563,7 +563,7 @@ index 00000000..9f8a83d2
 +}
 diff --git a/mobile/android/fenix/app/src/main/res/values-it/page_zoom_strings.xml b/mobile/android/fenix/app/src/main/res/values-it/page_zoom_strings.xml
 new file mode 100644
-index 00000000..bf012633
+index 00000000000..bf012633a6b
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/res/values-it/page_zoom_strings.xml
 @@ -0,0 +1,17 @@
@@ -586,7 +586,7 @@ index 00000000..bf012633
 +</resources>
 diff --git a/mobile/android/fenix/app/src/main/res/values/page_zoom_strings.xml b/mobile/android/fenix/app/src/main/res/values/page_zoom_strings.xml
 new file mode 100644
-index 00000000..4b54c957
+index 00000000000..4b54c95758a
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/res/values/page_zoom_strings.xml
 @@ -0,0 +1,30 @@
@@ -622,7 +622,7 @@ index 00000000..4b54c957
 +</resources>
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/PageZoomTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/PageZoomTest.kt
 new file mode 100644
-index 00000000..d4359b68
+index 00000000000..d4359b686e5
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/PageZoomTest.kt
 @@ -0,0 +1,91 @@
