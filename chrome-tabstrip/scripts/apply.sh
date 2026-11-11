@@ -75,6 +75,7 @@ is_optional() {
 if [ "$MODE" = check ]; then
     # Le patch vengono provate su un indice temporaneo, senza toccare i file. Il merge a 3 vie viene provato solo
     # se la patch non si applica così com'è.
+    prepare_three_way
     TMP_INDEX="$(mktemp)"
     trap 'rm -f "$TMP_INDEX"' EXIT
     reset_index() {
@@ -163,16 +164,19 @@ for patch in "${TARGET[@]}"; do
 
     if [ "$MODE" = best-effort ] && is_optional "$patch"; then
         # Il merge a 3 vie si usa solo se riesce senza conflitti: provato prima su un indice temporaneo.
+        prepare_three_way
+        stage_patches
         TMP_INDEX="$(mktemp)"
         cp "$(git rev-parse --git-path index)" "$TMP_INDEX"
         if GIT_INDEX_FILE="$TMP_INDEX" git apply --cached --3way "$PATCHES_DIR/$patch" >/dev/null 2>&1 &&
             git apply --3way --whitespace=nowarn "$PATCHES_DIR/$patch" >/dev/null 2>&1; then
             rm -f "$TMP_INDEX"
-            git reset -q -- "${PATCH_PATHS[@]}"
+            unstage_patches
             info "$patch applicata con il merge a 3 vie"
             APPLIED+=("$patch")
         else
             rm -f "$TMP_INDEX"
+            unstage_patches
             info "SALTATA: $patch non si applica, la funzione «$(feature_id "$patch")» non sarà inclusa"
             SKIPPED+=("$patch")
         fi
@@ -180,12 +184,14 @@ for patch in "${TARGET[@]}"; do
     fi
 
     info "Applicazione diretta fallita, provo con il merge a 3 vie..."
+    prepare_three_way
+    stage_patches
     THREE_WAY_STATUS=0
     git apply --3way --whitespace=nowarn "$PATCHES_DIR/$patch" || THREE_WAY_STATUS=$?
     CONFLICTS="$(git diff --name-only --diff-filter=U)"
     # "git apply --3way" aggiunge le modifiche all'indice: le togliamo, così la patch resta solo nei file
     # (come con l'applicazione diretta) e unapply.sh / fetch-firefox.sh funzionano allo stesso modo.
-    git reset -q -- "${PATCH_PATHS[@]}"
+    unstage_patches
     if [ "$THREE_WAY_STATUS" != 0 ] && [ -z "$CONFLICTS" ]; then
         # Il merge a 3 vie non è nemmeno partito (ad es. manca la versione dei file da cui è stata generata la patch)
         # e git non ha applicato nulla. La patch resta segnata come applicata, così refresh.sh rigenera proprio lei

@@ -1,6 +1,6 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabAudio.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabAudio.kt
 new file mode 100644
-index 00000000..34802efe
+index 00000000000..34802efee4b
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabAudio.kt
 @@ -0,0 +1,36 @@
@@ -42,7 +42,7 @@ index 00000000..34802efe
 +    }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabAudioFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabAudioFeature.kt
 new file mode 100644
-index 00000000..338da666
+index 00000000000..338da666f2a
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabAudioFeature.kt
 @@ -0,0 +1,102 @@
@@ -150,7 +150,7 @@ index 00000000..338da666
 +}
 diff --git a/mobile/android/fenix/app/src/main/res/values-it/tab_audio_strings.xml b/mobile/android/fenix/app/src/main/res/values-it/tab_audio_strings.xml
 new file mode 100644
-index 00000000..bca1984e
+index 00000000000..bca1984e876
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/res/values-it/tab_audio_strings.xml
 @@ -0,0 +1,8 @@
@@ -164,7 +164,7 @@ index 00000000..bca1984e
 +</resources>
 diff --git a/mobile/android/fenix/app/src/main/res/values/tab_audio_strings.xml b/mobile/android/fenix/app/src/main/res/values/tab_audio_strings.xml
 new file mode 100644
-index 00000000..d83ce3f5
+index 00000000000..d83ce3f56fa
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/res/values/tab_audio_strings.xml
 @@ -0,0 +1,11 @@
@@ -181,7 +181,7 @@ index 00000000..d83ce3f5
 +</resources>
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/TabAudioTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/TabAudioTest.kt
 new file mode 100644
-index 00000000..c29be9bf
+index 00000000000..c29be9bf0ac
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/TabAudioTest.kt
 @@ -0,0 +1,29 @@

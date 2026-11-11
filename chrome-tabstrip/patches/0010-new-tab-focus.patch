@@ -1,6 +1,6 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/NewTabFocusFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/NewTabFocusFeature.kt
 new file mode 100644
-index 00000000..1c513d55
+index 00000000000..1c513d55ec9
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/NewTabFocusFeature.kt
 @@ -0,0 +1,52 @@
@@ -58,7 +58,7 @@ index 00000000..1c513d55
 +}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/NewTabFocusFeatureTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/NewTabFocusFeatureTest.kt
 new file mode 100644
-index 00000000..d36d404b
+index 00000000000..d36d404b43e
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/NewTabFocusFeatureTest.kt
 @@ -0,0 +1,41 @@

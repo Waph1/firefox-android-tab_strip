@@ -1,6 +1,6 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabGroups.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabGroups.kt
 new file mode 100644
-index 00000000..9209bbd5
+index 00000000000..9209bbd5494
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabGroups.kt
 @@ -0,0 +1,144 @@
@@ -150,7 +150,7 @@ index 00000000..9209bbd5
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabGroupsFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabGroupsFeature.kt
 new file mode 100644
-index 00000000..56633188
+index 00000000000..56633188313
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/TabGroupsFeature.kt
 @@ -0,0 +1,376 @@
@@ -532,7 +532,7 @@ index 00000000..56633188
 +}
 diff --git a/mobile/android/fenix/app/src/main/res/values-it/tab_groups_strings.xml b/mobile/android/fenix/app/src/main/res/values-it/tab_groups_strings.xml
 new file mode 100644
-index 00000000..53cda5ff
+index 00000000000..53cda5ffc9f
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/res/values-it/tab_groups_strings.xml
 @@ -0,0 +1,15 @@
@@ -553,7 +553,7 @@ index 00000000..53cda5ff
 +</resources>
 diff --git a/mobile/android/fenix/app/src/main/res/values/tab_groups_strings.xml b/mobile/android/fenix/app/src/main/res/values/tab_groups_strings.xml
 new file mode 100644
-index 00000000..fa99d9e2
+index 00000000000..fa99d9e28e5
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/res/values/tab_groups_strings.xml
 @@ -0,0 +1,25 @@
@@ -584,7 +584,7 @@ index 00000000..fa99d9e2
 +</resources>
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/TabGroupsTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/TabGroupsTest.kt
 new file mode 100644
-index 00000000..af2a7f65
+index 00000000000..af2a7f65cf3
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/TabGroupsTest.kt
 @@ -0,0 +1,100 @@

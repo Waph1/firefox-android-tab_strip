@@ -1,6 +1,6 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBar.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBar.kt
 new file mode 100644
-index 00000000..712a963d
+index 00000000000..712a963d10b
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBar.kt
 @@ -0,0 +1,84 @@
@@ -90,7 +90,7 @@ index 00000000..712a963d
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarContent.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarContent.kt
 new file mode 100644
-index 00000000..b18813a1
+index 00000000000..b18813a123e
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarContent.kt
 @@ -0,0 +1,494 @@
@@ -590,7 +590,7 @@ index 00000000..b18813a1
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarFeature.kt
 new file mode 100644
-index 00000000..a48dad23
+index 00000000000..a48dad233e2
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/BookmarksBarFeature.kt
 @@ -0,0 +1,259 @@
@@ -855,7 +855,7 @@ index 00000000..a48dad23
 +}
 diff --git a/mobile/android/fenix/app/src/main/res/values-it/bookmarks_bar_strings.xml b/mobile/android/fenix/app/src/main/res/values-it/bookmarks_bar_strings.xml
 new file mode 100644
-index 00000000..eba78ed2
+index 00000000000..eba78ed2f5d
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/res/values-it/bookmarks_bar_strings.xml
 @@ -0,0 +1,17 @@
@@ -878,7 +878,7 @@ index 00000000..eba78ed2
 +</resources>
 diff --git a/mobile/android/fenix/app/src/main/res/values/bookmarks_bar_strings.xml b/mobile/android/fenix/app/src/main/res/values/bookmarks_bar_strings.xml
 new file mode 100644
-index 00000000..dddd51c9
+index 00000000000..dddd51c9ccf
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/res/values/bookmarks_bar_strings.xml
 @@ -0,0 +1,30 @@
@@ -914,7 +914,7 @@ index 00000000..dddd51c9
 +</resources>
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/BookmarksBarTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/BookmarksBarTest.kt
 new file mode 100644
-index 00000000..d2ca969a
+index 00000000000..d2ca969a11e
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/BookmarksBarTest.kt
 @@ -0,0 +1,80 @@

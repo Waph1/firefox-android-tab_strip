@@ -1,6 +1,6 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/Mouse.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/Mouse.kt
 new file mode 100644
-index 00000000..dd049ea4
+index 00000000000..dd049ea42a6
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/Mouse.kt
 @@ -0,0 +1,62 @@
@@ -68,7 +68,7 @@ index 00000000..dd049ea4
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/MouseFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/MouseFeature.kt
 new file mode 100644
-index 00000000..dfcd8ff5
+index 00000000000..dfcd8ff5890
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/MouseFeature.kt
 @@ -0,0 +1,190 @@
@@ -264,7 +264,7 @@ index 00000000..dfcd8ff5
 +}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/MouseTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/MouseTest.kt
 new file mode 100644
-index 00000000..a3a14b23
+index 00000000000..a3a14b235ce
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/MouseTest.kt
 @@ -0,0 +1,48 @@

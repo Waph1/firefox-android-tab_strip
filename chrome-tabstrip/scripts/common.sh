@@ -118,6 +118,57 @@ patches_hash() {
     (cd "$PATCHES_DIR" && cat series ./*.patch) | $sha | cut -d' ' -f1
 }
 
+# --- Merge a 3 vie ----------------------------------------------------------------------------------------------
+# Per il merge a 3 vie git ha bisogno delle versioni dei file da cui è stata generata ogni patch, che in un clone
+# senza storia (fetch-firefox.sh, GitHub) mancano. prepare_three_way le ricostruisce: scarica il commit di Firefox su
+# cui sono state generate le patch (UPSTREAM_BASE) e vi applica le patch in ordine (le obbligatorie, poi ogni
+# facoltativa sopra le sole obbligatorie) in un indice temporaneo, che salva nel repository le versioni intermedie dei
+# file. Va chiamata nella cartella di Firefox, dopo load_series; non fallisce mai: se qualcosa non riesce, il merge a
+# 3 vie semplicemente non sarà possibile.
+prepare_three_way() {
+    [ -z "${THREE_WAY_PREPARED:-}" ] || return 0
+    THREE_WAY_PREPARED=1
+    local base index i mandatory_tree
+    base="$(cat "$BASE_FILE" 2>/dev/null || true)"
+    [ -n "$base" ] || return 0
+    if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+        info "Scarico la versione di Firefox su cui sono state generate le patch, per il merge a 3 vie"
+        git fetch -q --depth=1 origin "$base" 2>/dev/null || return 0
+    fi
+    # In un clone «blobless» si scaricano solo i file toccati dalle patch, uno a uno.
+    cat "$PATCHES_DIR"/*.patch | sed -n 's#^diff --git a/\(.*\) b/.*#\1#p' | sort -u | while IFS= read -r path; do
+        oid="$(git rev-parse -q --verify "$base:$path" 2>/dev/null)" && git cat-file -p "$oid" >/dev/null 2>&1 || true
+    done
+    index="$(mktemp)"
+    rm -f "$index"
+    GIT_INDEX_FILE="$index" git read-tree "$base"
+    for i in "${!SERIES_FILES[@]}"; do
+        [ "${SERIES_OPTIONAL[$i]}" = 0 ] || continue
+        if ! GIT_INDEX_FILE="$index" git apply --cached "$PATCHES_DIR/${SERIES_FILES[$i]}" 2>/dev/null; then
+            rm -f "$index"
+            return 0
+        fi
+    done
+    mandatory_tree="$(GIT_INDEX_FILE="$index" git write-tree --missing-ok)"
+    for i in "${!SERIES_FILES[@]}"; do
+        [ "${SERIES_OPTIONAL[$i]}" = 1 ] || continue
+        rm -f "$index"
+        GIT_INDEX_FILE="$index" git read-tree "$mandatory_tree"
+        GIT_INDEX_FILE="$index" git apply --cached "$PATCHES_DIR/${SERIES_FILES[$i]}" 2>/dev/null || true
+    done
+    rm -f "$index"
+}
+
+# Mette nell'indice le modifiche delle patch già applicate (che stanno solo nei file), perché "git apply --3way"
+# vuole che l'indice corrisponda ai file. Dopo il merge va chiamata unstage_patches.
+stage_patches() {
+    git add -A -- "${PATCH_PATHS[@]}"
+}
+
+unstage_patches() {
+    git reset -q -- "${PATCH_PATHS[@]}"
+}
+
 # --- Patch applicate a un checkout di Firefox -------------------------------------------------------------------
 # L'elenco, nell'ordine in cui sono state applicate, sta in un file dentro .git del checkout.
 

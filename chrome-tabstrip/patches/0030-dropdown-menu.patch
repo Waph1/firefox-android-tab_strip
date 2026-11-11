@@ -1,6 +1,6 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/DropdownMenuFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/DropdownMenuFeature.kt
 new file mode 100644
-index 00000000..084e9302
+index 00000000000..084e930238e
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/DropdownMenuFeature.kt
 @@ -0,0 +1,169 @@
@@ -175,7 +175,7 @@ index 00000000..084e9302
 +}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/DropdownMenuFeatureTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/DropdownMenuFeatureTest.kt
 new file mode 100644
-index 00000000..a9e2cd6a
+index 00000000000..a9e2cd6a1b2
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/DropdownMenuFeatureTest.kt
 @@ -0,0 +1,101 @@
