@@ -260,16 +260,25 @@ sono elencate in **Impostazioni → Informazioni su Firefox → Funzioni della p
     (scrivendo `about:crashes` nella barra degli indirizzi), anche se le notifiche di Firefox sono disattivate.
   - Per i crash del motore Gecko (codice nativo) la issue dice solo in quale processo è avvenuto: il minidump resta
     sul telefono. Sono quasi sempre problemi di Mozilla, non della patch.
+- **Indirizzi senza «www.»** (`0100`): se un indirizzo scritto senza «www.» (ad es. `sito.it`) non si apre perché
+  il sito risponde solo con «www.» davanti (il dominio senza «www.» non esiste, non risponde o ha un certificato
+  valido solo per `www.sito.it`), Firefox apre da solo `www.sito.it`. La pagina di errore compare per un attimo e
+  poi viene sostituita, anche nella cronologia della scheda (Indietro non ci torna).
+  - Vale per gli indirizzi aperti da Firefox: scritti nella barra degli indirizzi, segnalibri, cronologia, link
+    aperti da altre app. I link dentro le pagine restano come sono.
+  - Prima di riprovare Firefox controlla che `www.sito.it` esista: per un sito che non esiste resta l'errore
+    originale. Non riprova per i sottodomini (ad es. `negozio.sito.it`), gli indirizzi IP o con una porta, né una
+    seconda volta se fallisce anche l'indirizzo con «www.».
 
 ## Versione di Firefox
 
 La patch segue le **versioni stabili** di Firefox per Android: gli script scaricano automaticamente l'ultima
-versione stabile pubblicata, cioè il tag `FIREFOX-ANDROID_<versione>_RELEASE` più recente (oggi **158.0.2**), che è
+versione stabile pubblicata, cioè il tag `FIREFOX-ANDROID_<versione>_RELEASE` più recente (oggi **160.0**), che è
 esattamente il codice da cui Mozilla compila Firefox per il Play Store. Il file [`UPSTREAM_BASE`](UPSTREAM_BASE)
 indica il commit di Firefox su cui la patch è stata verificata l'ultima volta.
 
 Per provare un'altra versione basta la variabile `FIREFOX_VERSION`: `beta`, `main` (Nightly) o un tag preciso, ad es.
-`FIREFOX_VERSION=FIREFOX-ANDROID_158_0_RELEASE chrome-tabstrip/scripts/fetch-firefox.sh ~/firefox`.
+`FIREFOX_VERSION=FIREFOX-ANDROID_160_0_RELEASE chrome-tabstrip/scripts/fetch-firefox.sh ~/firefox`.
 
 ## Patch obbligatorie e facoltative
 
@@ -477,6 +486,8 @@ in `HomeActivity.kt` anche l'avvio delle funzioni facoltative (`PatchFeatureHook
 le azioni chiudi e mostra il menu), icone dopo il titolo (`PatchFeatureHooks.TabStripTabIcons`) e qualcosa alla lista
 delle schede (`PatchFeatureHooks.tabStripModifier`); una funzione facoltativa può anche disporre la tab strip, con
 elementi propri tra le schede e schede nascoste (`PatchFeatureHooks.tabStripEntries`, `isTabHidden`).
+`AppRequestInterceptor.kt` passa alle funzioni facoltative le pagine che si aprono e quelle che non si aprono
+(`PatchFeatureHooks.onLoadRequest`, `onLoadError`).
 `BrowserToolbarComposable.kt` e `HomeToolbarComposable.kt` mostrano accanto alla barra degli indirizzi le righe delle
 funzioni facoltative (`PatchFeatureHooks.AddressBarRow`), `ext/Fragment.kt` ne conta l'altezza nello spazio che le
 pagine lasciano alle barre (`PatchFeatureHooks.addressBarRowHeight`) e `BaseBrowserFragment.kt` lo ricalcola quando
@@ -541,6 +552,14 @@ schermata dei gruppi di Firefox (`TabGroupFlowFragment`). La `0020` salta con Ct
 Solo file nuovi: `patchfeatures/CrashReports.kt` (titolo, dettagli e stack della issue, indirizzo entro il limite di
 lunghezza di GitHub), `CrashReportsFeature.kt` (il servizio che sostituisce quello di Mozilla e mostra la notifica),
 `res/values/` e `res/values-it/crash_reports_strings.xml`, `test/.../CrashReportsTest.kt`.
+
+### `0100`: indirizzi senza «www.» (facoltativa)
+
+Solo file nuovi: `patchfeatures/WwwFallbackFeature.kt` (ricorda l'ultimo indirizzo che Firefox ha chiesto di aprire
+in ogni scheda, con `PatchFeatureHooks.onLoadRequest`; quando fallisce, `PatchFeatureHooks.onLoadError`, controlla
+dominio e DNS dell'indirizzo con «www.», aspetta la pagina di errore e la sostituisce) e
+`test/.../WwwFallbackTest.kt`. Da solo, Gecko prova l'indirizzo con «www.» solo quando il certificato del sito è
+valido per quell'indirizzo.
 
 ## Differenze rispetto a Chrome
 

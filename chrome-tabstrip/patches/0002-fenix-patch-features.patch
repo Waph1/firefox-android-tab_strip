@@ -1,3 +1,40 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/AppRequestInterceptor.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/AppRequestInterceptor.kt
+index 81166bea955..c4f90704d08 100644
+--- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/AppRequestInterceptor.kt
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/AppRequestInterceptor.kt
+@@ -23,6 +23,7 @@ import org.mozilla.fenix.AppRequestInterceptor.Companion.ERROR_PAGE_ACTION_SCHEM
+ import org.mozilla.fenix.GleanMetrics.ErrorPage
+ import org.mozilla.fenix.ext.components
+ import org.mozilla.fenix.ext.isOnline
++import org.mozilla.fenix.patchfeatures.PatchFeatureHooks
+ 
+ class AppRequestInterceptor(
+     private val context: Context,
+@@ -49,6 +50,15 @@ class AppRequestInterceptor(
+         isDirectNavigation: Boolean,
+         isSubframeRequest: Boolean,
+     ): RequestInterceptor.InterceptionResponse? {
++        PatchFeatureHooks.loadRequested(
++            engineSession,
++            uri,
++            hasUserGesture,
++            isRedirect,
++            isDirectNavigation,
++            isSubframeRequest,
++        )
++
+         interceptErrorPageAction(uri)?.let {
+             return it
+         }
+@@ -82,6 +92,8 @@ class AppRequestInterceptor(
+         errorType: ErrorType,
+         uri: String?,
+     ): RequestInterceptor.ErrorResponse {
++        PatchFeatureHooks.loadFailed(session, errorType, uri)
++
+         val improvedErrorType = improveErrorType(errorType)
+         val riskLevel = getRiskLevel(improvedErrorType)
+ 
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
 index b8aa2da7d72..5fa5c241721 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
@@ -979,10 +1016,10 @@ index 129bef85aa8..7980c9d04af 100644
          }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
 new file mode 100644
-index 00000000000..de520fa6394
+index 00000000000..0ee4ddffcd8
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
-@@ -0,0 +1,471 @@
+@@ -0,0 +1,532 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -1005,6 +1042,8 @@ index 00000000000..de520fa6394
 +import kotlinx.coroutines.flow.SharedFlow
 +import kotlinx.coroutines.flow.asSharedFlow
 +import mozilla.components.compose.base.menu.MenuItem
++import mozilla.components.concept.engine.EngineSession
++import mozilla.components.concept.engine.request.ErrorType
 +import mozilla.components.lib.crash.service.CrashReporterService
 +import org.json.JSONArray
 +import org.json.JSONException
@@ -1337,6 +1376,41 @@ index 00000000000..de520fa6394
 +     */
 +    fun addressBarRowHeight(context: Context): Int = 0
 +
++    /**
++     * Invoked when a page starts loading, before Firefox handles the request (see `AppRequestInterceptor`).
++     *
++     * @param engineSession The engine session loading the page.
++     * @param uri The address of the page.
++     * @param hasUserGesture Whether the user asked for the page in the page shown, e.g. with a link.
++     * @param isRedirect Whether the page is loaded because another one redirected to it.
++     * @param isDirectNavigation Whether Firefox asked for the page, e.g. for an address typed in the address bar or a
++     *   bookmark, rather than the page shown.
++     * @param isSubframeRequest Whether the page is loaded in a frame of the page shown.
++     */
++    @Suppress("LongParameterList")
++    fun onLoadRequest(
++        engineSession: EngineSession,
++        uri: String,
++        hasUserGesture: Boolean,
++        isRedirect: Boolean,
++        isDirectNavigation: Boolean,
++        isSubframeRequest: Boolean,
++    ) = Unit
++
++    /**
++     * Invoked when a page fails to load, before Firefox shows its error page in its place (see
++     * `AppRequestInterceptor`).
++     *
++     * @param engineSession The engine session that failed to load the page.
++     * @param errorType The error.
++     * @param uri The address of the page, if known.
++     */
++    fun onLoadError(
++        engineSession: EngineSession,
++        errorType: ErrorType,
++        uri: String?,
++    ) = Unit
++
 +    companion object {
 +        private val addressBarRowsChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 +
@@ -1443,6 +1517,30 @@ index 00000000000..de520fa6394
 +        /** Tells the pages to make room again for the rows next to the address bar, see [addressBarRowsChanged]. */
 +        fun onAddressBarRowsChanged() {
 +            addressBarRowsChanges.tryEmit(Unit)
++        }
++
++        /** Tells the optional features that a page starts loading, see [PatchFeatureHooks.onLoadRequest]. */
++        @Suppress("LongParameterList")
++        fun loadRequested(
++            engineSession: EngineSession,
++            uri: String,
++            hasUserGesture: Boolean,
++            isRedirect: Boolean,
++            isDirectNavigation: Boolean,
++            isSubframeRequest: Boolean,
++        ) {
++            all.forEach {
++                it.onLoadRequest(engineSession, uri, hasUserGesture, isRedirect, isDirectNavigation, isSubframeRequest)
++            }
++        }
++
++        /** Tells the optional features that a page failed to load, see [PatchFeatureHooks.onLoadError]. */
++        fun loadFailed(
++            engineSession: EngineSession,
++            errorType: ErrorType,
++            uri: String?,
++        ) {
++            all.forEach { it.onLoadError(engineSession, errorType, uri) }
 +        }
 +    }
 +}
