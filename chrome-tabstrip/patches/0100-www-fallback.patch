@@ -1,0 +1,532 @@
+diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/WwwFallbackFeature.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/WwwFallbackFeature.kt
+new file mode 100644
+index 00000000000..882d99f8d47
+--- /dev/null
++++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/WwwFallbackFeature.kt
+@@ -0,0 +1,270 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.MainScope
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.withContext
++import mozilla.components.concept.engine.EngineSession
++import mozilla.components.concept.engine.EngineSession.LoadUrlFlags
++import mozilla.components.concept.engine.request.ErrorType
++import org.mozilla.fenix.HomeActivity
++import org.mozilla.fenix.ext.components
++import java.net.InetAddress
++import java.net.URI
++import java.net.URISyntaxException
++import java.net.UnknownHostException
++import java.util.WeakHashMap
++
++private const val WWW_PREFIX = "www."
++private const val SCHEME_SEPARATOR = "://"
++
++// How long the address with "www." waits for the error page of the one without it, see [WwwFallback].
++private const val ERROR_PAGE_TIMEOUT_MS = 3000L
++
++private val ipv4Host = Regex("""[0-9.]+""")
++
++/**
++ * The errors after which the address with "www." is tried: the site doesn't answer without "www.", or not securely
++ * (e.g. its certificate is only valid for the address with "www.").
++ */
++internal val WWW_FALLBACK_ERRORS =
++    setOf(
++        ErrorType.ERROR_UNKNOWN_HOST,
++        ErrorType.ERROR_CONNECTION_REFUSED,
++        ErrorType.ERROR_NET_TIMEOUT,
++        ErrorType.ERROR_NET_RESET,
++        ErrorType.ERROR_NET_INTERRUPT,
++        ErrorType.ERROR_SECURITY_BAD_CERT,
++        ErrorType.ERROR_SECURITY_SSL,
++        ErrorType.ERROR_HTTPS_ONLY,
++    )
++
++/**
++ * Optional feature "addresses without www." (`0100-www-fallback.patch`): when an address typed in the address bar
++ * (or opened from a bookmark, the history, another app...) doesn't load because the site only answers with "www."
++ * before its domain (e.g. `example.it` doesn't exist, `www.example.it` does), Firefox loads the address with "www."
++ * in its place. The links of the pages are left as they are. (By itself, Gecko only tries the address with "www."
++ * when the certificate of the site is valid for it.)
++ */
++object WwwFallbackFeature : PatchFeatureHooks {
++    private var fallback: WwwFallback? = null
++
++    override fun onActivityCreated(activity: HomeActivity) {
++        if (fallback != null) return
++        val publicSuffixList = activity.components.publicSuffixList
++        fallback = WwwFallback(registrableDomain = { host -> publicSuffixList.getPublicSuffixPlusOne(host).await() })
++    }
++
++    override fun onLoadRequest(
++        engineSession: EngineSession,
++        uri: String,
++        hasUserGesture: Boolean,
++        isRedirect: Boolean,
++        isDirectNavigation: Boolean,
++        isSubframeRequest: Boolean,
++    ) {
++        fallback?.onLoadRequest(engineSession, uri, hasUserGesture, isDirectNavigation, isSubframeRequest)
++    }
++
++    override fun onLoadError(
++        engineSession: EngineSession,
++        errorType: ErrorType,
++        uri: String?,
++    ) {
++        fallback?.onLoadError(engineSession, errorType, uri)
++    }
++}
++
++/**
++ * Loads the address with "www." in place of an address without it that Firefox asked to load (not a link of a
++ * page) and that failed with one of [WWW_FALLBACK_ERRORS], if the site has an address with "www.".
++ *
++ * The error page of the address without "www." is shown until the other address starts loading, which then takes its
++ * place in the history of the tab. Each address is tried with "www." only once: if that fails too, its error page
++ * stays.
++ *
++ * @param registrableDomain Returns the domain that can be registered of a host (e.g. `example.co.uk` for
++ *   `shop.example.co.uk`), or `null` if it isn't known: only those domains get "www.", not their subdomains.
++ * @param hostResolves Whether a host exists, i.e. its address can be found in the DNS.
++ * @param scope [CoroutineScope] of the main thread, where the engine sessions are used.
++ * @param errorPageTimeoutMs How long to wait for the error page before loading the address with "www." anyway (then
++ *   it doesn't take the place of the error page in the history).
++ */
++internal class WwwFallback(
++    private val registrableDomain: suspend (host: String) -> String?,
++    private val hostResolves: suspend (host: String) -> Boolean = ::resolvesWithDns,
++    private val scope: CoroutineScope = MainScope(),
++    private val errorPageTimeoutMs: Long = ERROR_PAGE_TIMEOUT_MS,
++) {
++    // The address of the last page that Firefox asked each engine session to load, until another page is loaded.
++    private val requestedUrls = WeakHashMap<EngineSession, String>()
++
++    // The address with "www." that each engine session is about to load.
++    private val retries = WeakHashMap<EngineSession, Retry>()
++
++    /** See [PatchFeatureHooks.onLoadRequest]. */
++    fun onLoadRequest(
++        engineSession: EngineSession,
++        uri: String,
++        hasUserGesture: Boolean,
++        isDirectNavigation: Boolean,
++        isSubframeRequest: Boolean,
++    ) {
++        if (isSubframeRequest) return
++
++        // Another page was asked for: the address with "www." isn't wanted anymore.
++        if (isDirectNavigation || hasUserGesture) {
++            retries.remove(engineSession)?.cancel()
++        }
++
++        // The redirects and the reloads of the same site without the user (e.g. when HTTPS-First goes back to HTTP)
++        // are part of the same request, a link isn't.
++        val requestedUrl = requestedUrls[engineSession]
++        when {
++            isDirectNavigation -> requestedUrls[engineSession] = uri
++            hasUserGesture || requestedUrl == null || hostOf(uri) != hostOf(requestedUrl) ->
++                requestedUrls.remove(engineSession)
++        }
++    }
++
++    /** See [PatchFeatureHooks.onLoadError]. */
++    fun onLoadError(
++        engineSession: EngineSession,
++        errorType: ErrorType,
++        uri: String?,
++    ) {
++        if (errorType !in WWW_FALLBACK_ERRORS) return
++        val requestedUrl = requestedUrls[engineSession] ?: return
++        val host = hostOf(requestedUrl) ?: return
++        if (uri == null || hostOf(uri) != host) return
++
++        requestedUrls.remove(engineSession)
++        retries.remove(engineSession)?.cancel()
++        val retry = Retry(engineSession, requestedUrl, host)
++        retries[engineSession] = retry
++        retry.start()
++    }
++
++    private suspend fun checkedAlternativeUrl(
++        requestedUrl: String,
++        host: String,
++    ): String? {
++        val url = wwwAlternativeUrl(requestedUrl) ?: return null
++        if (registrableDomain(host) != host) return null
++        return if (hostResolves(WWW_PREFIX + host)) url else null
++    }
++
++    /** Loads the address with "www." for [requestedUrl], which failed, once its error page is shown. */
++    private inner class Retry(
++        private val engineSession: EngineSession,
++        private val requestedUrl: String,
++        private val host: String,
++    ) : EngineSession.Observer {
++        private var alternativeUrl: String? = null
++        private var isErrorPageShown = false
++        private var isFinished = false
++        private var job: Job? = null
++
++        fun start() {
++            engineSession.register(this)
++            job =
++                scope.launch {
++                    val url = checkedAlternativeUrl(requestedUrl, host)
++                    if (url == null) {
++                        finish()
++                        return@launch
++                    }
++                    alternativeUrl = url
++                    if (!isErrorPageShown) {
++                        // Normally the error page is shown first.
++                        delay(errorPageTimeoutMs)
++                    }
++                    load()
++                }
++        }
++
++        // The error page shows the address that failed.
++        override fun onLocationChange(
++            url: String,
++            hasUserGesture: Boolean,
++        ) {
++            if (isFinished || isErrorPageShown || hostOf(url) != host) return
++            isErrorPageShown = true
++            if (alternativeUrl != null) {
++                job?.cancel()
++                // Not while the engine session tells its observers about the page.
++                job = scope.launch { load() }
++            }
++        }
++
++        fun cancel() {
++            job?.cancel()
++            finish()
++        }
++
++        private fun load() {
++            val url = alternativeUrl
++            if (isFinished || url == null) return
++            val flags =
++                if (isErrorPageShown) {
++                    LoadUrlFlags.select(LoadUrlFlags.LOAD_FLAGS_REPLACE_HISTORY)
++                } else {
++                    LoadUrlFlags.none()
++                }
++            finish()
++            engineSession.loadUrl(url, flags = flags)
++        }
++
++        private fun finish() {
++            isFinished = true
++            engineSession.unregister(this)
++            if (retries[engineSession] === this) {
++                retries.remove(engineSession)
++            }
++        }
++    }
++}
++
++/**
++ * The address [url] with "www." before its domain, or `null` if it isn't the address of a website without "www." (e.g.
++ * it has a port, an IP address, or already "www.").
++ */
++internal fun wwwAlternativeUrl(url: String): String? {
++    val uri = parseUri(url) ?: return null
++    val scheme = uri.scheme?.lowercase()
++    val host = hostOf(uri)
++    val isWebsite = (scheme == "http" || scheme == "https") && uri.rawUserInfo == null && uri.port == -1
++    if (!isWebsite || host == null || host.startsWith(WWW_PREFIX)) return null
++    if ('.' !in host || host.endsWith('.') || host.startsWith('[') || ipv4Host.matches(host)) return null
++    val authorityStart = url.indexOf(SCHEME_SEPARATOR) + SCHEME_SEPARATOR.length
++    return url.substring(0, authorityStart) + WWW_PREFIX + url.substring(authorityStart)
++}
++
++private fun hostOf(url: String): String? = parseUri(url)?.let(::hostOf)
++
++private fun hostOf(uri: URI): String? = uri.host?.lowercase()
++
++private fun parseUri(url: String): URI? =
++    try {
++        URI(url)
++    } catch (e: URISyntaxException) {
++        null
++    }
++
++private suspend fun resolvesWithDns(host: String): Boolean =
++    withContext(Dispatchers.IO) {
++        try {
++            InetAddress.getAllByName(host).isNotEmpty()
++        } catch (e: UnknownHostException) {
++            false
++        } catch (e: SecurityException) {
++            false
++        }
++    }
+diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/WwwFallbackTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/WwwFallbackTest.kt
+new file mode 100644
+index 00000000000..f0c4aa2847f
+--- /dev/null
++++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/WwwFallbackTest.kt
+@@ -0,0 +1,250 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++package org.mozilla.fenix.patchfeatures
++
++import io.mockk.every
++import io.mockk.mockk
++import io.mockk.slot
++import io.mockk.verify
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.ExperimentalCoroutinesApi
++import kotlinx.coroutines.test.StandardTestDispatcher
++import kotlinx.coroutines.test.TestScope
++import kotlinx.coroutines.test.advanceTimeBy
++import kotlinx.coroutines.test.runCurrent
++import kotlinx.coroutines.test.runTest
++import mozilla.components.concept.engine.EngineSession
++import mozilla.components.concept.engine.EngineSession.LoadUrlFlags
++import mozilla.components.concept.engine.request.ErrorType
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++@OptIn(ExperimentalCoroutinesApi::class)
++class WwwFallbackTest {
++    private val testDispatcher = StandardTestDispatcher()
++    private val resolvedHosts = mutableListOf<String>()
++    private val existingHosts = mutableSetOf("www.example.it", "www.example.co.uk")
++
++    private val observer = slot<EngineSession.Observer>()
++    private val engineSession: EngineSession =
++        mockk(relaxed = true) {
++            every { register(capture(observer)) } returns Unit
++        }
++
++    private val fallback =
++        WwwFallback(
++            // Like the public suffix list, for the domains of the tests.
++            registrableDomain = { host ->
++                host.split('.').takeLast(if (host.endsWith(".co.uk")) 3 else 2).joinToString(".")
++            },
++            hostResolves = { host ->
++                resolvedHosts.add(host)
++                host in existingHosts
++            },
++            scope = CoroutineScope(testDispatcher),
++            errorPageTimeoutMs = 3000,
++        )
++
++    private fun typed(url: String) =
++        fallback.onLoadRequest(
++            engineSession,
++            url,
++            hasUserGesture = false,
++            isDirectNavigation = true,
++            isSubframeRequest = false,
++        )
++
++    private fun TestScope.showErrorPage(url: String) {
++        observer.captured.onLocationChange(url, hasUserGesture = false)
++        runCurrent()
++    }
++
++    private fun verifyLoaded(
++        url: String,
++        flags: LoadUrlFlags,
++    ) {
++        verify(exactly = 1) { engineSession.loadUrl(url, null, flags, null, null, false) }
++        verify { engineSession.unregister(observer.captured) }
++    }
++
++    private fun verifyNothingLoaded() {
++        verify(exactly = 0) { engineSession.loadUrl(any(), any(), any(), any(), any(), any()) }
++    }
++
++    @Test
++    fun `WHEN a typed address doesn't exist THEN the address with www replaces its error page`() =
++        runTest(testDispatcher) {
++            typed("http://example.it/page?q=1")
++            fallback.onLoadError(engineSession, ErrorType.ERROR_UNKNOWN_HOST, "https://example.it/page?q=1")
++            runCurrent()
++
++            assertEquals(listOf("www.example.it"), resolvedHosts)
++            verifyNothingLoaded()
++
++            showErrorPage("https://example.it/page?q=1")
++
++            verifyLoaded("http://www.example.it/page?q=1", LoadUrlFlags.select(LoadUrlFlags.LOAD_FLAGS_REPLACE_HISTORY))
++        }
++
++    @Test
++    fun `WHEN the error page is shown before the check THEN the address with www replaces it after the check`() =
++        runTest(testDispatcher) {
++            typed("http://example.co.uk")
++            fallback.onLoadError(engineSession, ErrorType.ERROR_CONNECTION_REFUSED, "http://example.co.uk/")
++            showErrorPage("http://example.co.uk/")
++
++            verifyLoaded("http://www.example.co.uk", LoadUrlFlags.select(LoadUrlFlags.LOAD_FLAGS_REPLACE_HISTORY))
++        }
++
++    @Test
++    fun `WHEN the error page isn't shown THEN the address with www is loaded after a while`() =
++        runTest(testDispatcher) {
++            typed("https://example.it")
++            fallback.onLoadError(engineSession, ErrorType.ERROR_SECURITY_BAD_CERT, "https://example.it/")
++            runCurrent()
++            advanceTimeBy(2999)
++            runCurrent()
++            verifyNothingLoaded()
++
++            advanceTimeBy(1)
++            runCurrent()
++
++            verifyLoaded("https://www.example.it", LoadUrlFlags.none())
++        }
++
++    @Test
++    fun `WHEN the address with www doesn't exist either THEN the error page stays`() =
++        runTest(testDispatcher) {
++            typed("http://nothing.it")
++            fallback.onLoadError(engineSession, ErrorType.ERROR_UNKNOWN_HOST, "https://nothing.it/")
++            showErrorPage("https://nothing.it/")
++            advanceTimeBy(5000)
++            runCurrent()
++
++            assertEquals(listOf("www.nothing.it"), resolvedHosts)
++            verifyNothingLoaded()
++            verify { engineSession.unregister(observer.captured) }
++        }
++
++    @Test
++    fun `WHEN a link fails THEN the address with www isn't tried`() =
++        runTest(testDispatcher) {
++            typed("https://www.mozilla.org")
++            fallback.onLoadRequest(
++                engineSession,
++                "https://example.it/",
++                hasUserGesture = true,
++                isDirectNavigation = false,
++                isSubframeRequest = false,
++            )
++            fallback.onLoadError(engineSession, ErrorType.ERROR_UNKNOWN_HOST, "https://example.it/")
++            advanceTimeBy(5000)
++            runCurrent()
++
++            assertTrue(resolvedHosts.isEmpty())
++            verifyNothingLoaded()
++        }
++
++    @Test
++    fun `WHEN a typed address is redirected to another site that fails THEN the address with www isn't tried`() =
++        runTest(testDispatcher) {
++            typed("http://short.it/x")
++            fallback.onLoadRequest(
++                engineSession,
++                "https://example.it/",
++                hasUserGesture = false,
++                isDirectNavigation = false,
++                isSubframeRequest = false,
++            )
++            fallback.onLoadError(engineSession, ErrorType.ERROR_UNKNOWN_HOST, "https://example.it/")
++            advanceTimeBy(5000)
++            runCurrent()
++
++            verifyNothingLoaded()
++        }
++
++    @Test
++    fun `WHEN HTTPS-First goes back to HTTP on the same site THEN the address with www is still tried`() =
++        runTest(testDispatcher) {
++            typed("http://example.it")
++            fallback.onLoadRequest(
++                engineSession,
++                "http://example.it/",
++                hasUserGesture = false,
++                isDirectNavigation = false,
++                isSubframeRequest = false,
++            )
++            fallback.onLoadError(engineSession, ErrorType.ERROR_NET_TIMEOUT, "http://example.it/")
++            showErrorPage("http://example.it/")
++
++            verifyLoaded("http://www.example.it", LoadUrlFlags.select(LoadUrlFlags.LOAD_FLAGS_REPLACE_HISTORY))
++        }
++
++    @Test
++    fun `WHEN another page is asked for before the error page THEN the address with www isn't loaded`() =
++        runTest(testDispatcher) {
++            typed("http://example.it")
++            fallback.onLoadError(engineSession, ErrorType.ERROR_UNKNOWN_HOST, "https://example.it/")
++            typed("https://www.mozilla.org")
++            showErrorPage("https://example.it/")
++            advanceTimeBy(5000)
++            runCurrent()
++
++            verifyNothingLoaded()
++        }
++
++    @Test
++    fun `WHEN other errors or subdomains fail THEN the address with www isn't tried`() =
++        runTest(testDispatcher) {
++            typed("http://example.it")
++            fallback.onLoadError(engineSession, ErrorType.ERROR_FILE_NOT_FOUND, "https://example.it/")
++            typed("http://shop.example.it")
++            fallback.onLoadError(engineSession, ErrorType.ERROR_UNKNOWN_HOST, "https://shop.example.it/")
++            typed("http://www.example.it")
++            fallback.onLoadError(engineSession, ErrorType.ERROR_UNKNOWN_HOST, "https://www.example.it/")
++            advanceTimeBy(5000)
++            runCurrent()
++
++            assertTrue(resolvedHosts.isEmpty())
++            verifyNothingLoaded()
++        }
++
++    @Test
++    fun `WHEN the address with www fails too THEN it isn't tried again`() =
++        runTest(testDispatcher) {
++            typed("http://example.it")
++            fallback.onLoadError(engineSession, ErrorType.ERROR_UNKNOWN_HOST, "https://example.it/")
++            showErrorPage("https://example.it/")
++            typed("http://www.example.it")
++            fallback.onLoadError(engineSession, ErrorType.ERROR_UNKNOWN_HOST, "https://www.example.it/")
++            advanceTimeBy(5000)
++            runCurrent()
++
++            verify(exactly = 1) { engineSession.loadUrl(any(), any(), any(), any(), any(), any()) }
++        }
++
++    @Test
++    fun `WHEN making the address with www THEN only websites without www get it`() {
++        assertEquals("http://www.example.it", wwwAlternativeUrl("http://example.it"))
++        assertEquals("https://www.Example.IT/a/b?c=d#e", wwwAlternativeUrl("https://Example.IT/a/b?c=d#e"))
++        assertNull(wwwAlternativeUrl("http://www.example.it/"))
++        assertNull(wwwAlternativeUrl("http://WWW.example.it/"))
++        assertNull(wwwAlternativeUrl("http://example.it:8080/"))
++        assertNull(wwwAlternativeUrl("http://user@example.it/"))
++        assertNull(wwwAlternativeUrl("http://192.168.1.1/"))
++        assertNull(wwwAlternativeUrl("http://[::1]/"))
++        assertNull(wwwAlternativeUrl("http://localhost/"))
++        assertNull(wwwAlternativeUrl("ftp://example.it/"))
++        assertNull(wwwAlternativeUrl("about:blank"))
++        assertNull(wwwAlternativeUrl("not a url"))
++    }
++
++    @Test
++    fun `GIVEN the patch of the feature is applied THEN the feature gets the page loads`() {
++        assertTrue(WwwFallbackFeature in PatchFeatureHooks.all)
++    }
++}

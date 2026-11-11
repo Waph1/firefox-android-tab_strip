@@ -21,3 +21,4 @@
 0070-tab-audio.patch                            | facoltativa  | Icona audio sulle schede | Audio icon on the tabs
 0080-tab-groups.patch                           | facoltativa  | Gruppi di schede nella tab strip | Tab groups in the tab strip
 0090-crash-reports.patch                        | facoltativa  | Segnalazioni dei crash su GitHub | Crash reports on GitHub
+0100-www-fallback.patch                         | facoltativa  | Indirizzi senza «www.» | Addresses without “www.”
