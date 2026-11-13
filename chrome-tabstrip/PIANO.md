@@ -324,3 +324,167 @@ nei gruppi.
 - testi in italiano e in inglese;
 - sezione nel README (che diventa la descrizione ufficiale) e aggiornamento di questa tabella;
 - prova sul Fold, aperto e chiuso, con e senza tastiera e mouse, con barra degli indirizzi in alto e in basso.
+
+---
+
+# Fase 2: cosa manca rispetto a Firefox per computer
+
+Confronto fatto sul sorgente di Firefox 160 (`FIREFOX-ANDROID_160_0_RELEASE`) e sui dati di compatibilità di MDN del
+12 novembre 2026. **Verificato** vuol dire letto nel sorgente; **da provare** vuol dire plausibile, ma va provato sul
+telefono prima di contarci. Niente di questa fase è ancora stato scritto.
+
+## In breve
+
+- Il **motore è lo stesso** di Firefox per computer (Gecko 160): HTML, CSS e JavaScript sono praticamente identici.
+  Le differenze vere sono una ventina di API (elenco sotto).
+- Mancano soprattutto **pezzi di interfaccia** da computer (finestre, menu col tasto destro, strumenti per
+  sviluppatori, barra laterale) e buona parte delle **API per le estensioni**.
+- Tre cose verificate nel sorgente rendono fattibile molto più del previsto **senza compilare Gecko**:
+  1. `about:config` nella versione stabile è solo spento: una riga in `GeckoProvider.kt`
+     (`aboutConfigEnabled(Config.channel.isBeta || ...)`);
+  2. l'app può leggere e cambiare qualsiasi preferenza del motore (`GeckoPreferenceController`, in Fenix
+     `BrowserPreferencesRuntime.setBrowserPref`);
+  3. un'estensione interna dell'APK è «privilegiata»: può portare con sé codice che gira **dentro il motore**
+     (`experiment_apis`, come fa l'estensione interna di Mozilla `webcompat-reporter`). Da lì si raggiungono, ad
+     esempio, lo zoom vero delle pagine (`BrowsingContext.fullZoom`), la piattaforma dichiarata ai siti
+     (`customPlatform`) e gli eventi touch (`touchEventsOverride`). La patch dello zoom (`0040`) installa già
+     un'estensione interna, ma senza questa parte.
+
+## Elenco di ciò che manca
+
+🟢 patch piccola, come quelle già fatte · 🟡 fattibile ma grande, fragile o da provare · 🔴 non fattibile da qui
+(serve Mozilla, bisogna compilare Gecko, lo impedisce Android, o vorrebbe dire riscrivere l'app)
+
+### Finestre e schede
+
+| Manca                                                              |    | Note |
+|--------------------------------------------------------------------|----|------|
+| Più finestre (Ctrl+N, trascinare una scheda fuori, finestra privata, «Mini Window» di Firefox 160) | 🔴 | Verificato: `HomeActivity` è `singleTask`, un solo elenco di schede. Già scartato |
+| Vista affiancata: due schede una accanto all'altra (Firefox 149)   | 🟡 | Grande: Firefox per Android mostra una sola pagina alla volta |
+| Schede fissate                                                     | 🟡 | Rimandato nella fase 1. Media: l'elenco delle fissate lo tiene la patch |
+| Anteprima della pagina passando il mouse su una scheda             | 🟢 | Le miniature esistono già (panoramica delle schede) |
+| Menu della scheda completo: Duplica, Chiudi le schede a destra, Aggiungi ai segnalibri, Invia a dispositivo, Riapri scheda chiusa | 🟢 | Si aggiungono al menu della `0002` |
+| Selezione di più schede nella tab strip (Ctrl+clic, Shift+clic)     | 🟡 | Media. Nella panoramica delle schede c'è già |
+| Trascinare una scheda dentro/fuori da un gruppo, o un link sulla tab strip | 🟡 | Media |
+| Barra laterale (segnalibri, cronologia, schede di altri dispositivi) e schede verticali | 🟡 | Grande |
+| Contenitori (Multi-Account Containers)                             | 🟡 | Grande. Il motore li supporta (`contextId`) e c'è un componente inutilizzato (`feature-containers`), ma manca tutta l'interfaccia |
+| Profili                                                            | 🔴 | Un'app Android ha un solo profilo. Ripiego: la variante `nightly` installata accanto |
+
+### Tastiera
+
+Scorciatoie di Firefox per computer che la `0020` non ha ancora (tutte 🟢): Ctrl+Shift+P (scheda privata), Ctrl+H
+(cronologia), Ctrl+J (download), Ctrl+Shift+O (segnalibri), Ctrl+P (stampa), Ctrl+S (salva come PDF), Ctrl+U
+(sorgente della pagina), F11 (schermo intero), F3 / Ctrl+G / Shift+F3 (trova successivo/precedente), Esc (ferma il
+caricamento), Ctrl+Shift+Canc (cancella dati), Ctrl+Shift+A (estensioni), Ctrl+K (cerca), Alt+Invio (apre l'indirizzo
+in una nuova scheda), Ctrl+Invio (aggiunge www. e .com), Ctrl+Shift+PagSu/PagGiù (sposta la scheda), Ctrl+M
+(silenzia la scheda), Alt+Home (pagina iniziale).
+
+Non fattibile: F12 (strumenti per sviluppatori, vedi sotto). Da provare con le preferenze: F7 (navigazione con
+cursore) e la ricerca rapida con `/` (verificato: `accessibility.typeaheadfind` è `false` su Android).
+
+### Mouse sulle pagine
+
+| Manca                                                              |    | Note |
+|--------------------------------------------------------------------|----|------|
+| Menu col tasto destro completo (sfondo della pagina, testo, campi: Indietro, Ricarica, Seleziona tutto, Copia/Incolla, Sorgente…) | 🟡 | Verificato: il motore avvisa l'app solo per link, immagini e video. Serve l'estensione interna |
+| Indirizzo del link in basso mentre il mouse ci passa sopra         | 🟡 | Serve l'estensione interna |
+| Ctrl+rotella per lo zoom                                           | 🟢 | Serve un punto di aggancio in più nella `0002` per la rotella |
+| Barre di scorrimento da trascinare col mouse                       | 🟡 | Verificato: `apz.drag.enabled` è `false` su Android. Da provare con le preferenze |
+| Scorrimento automatico col clic centrale                           | 🟡 | È fatto dall'interfaccia di Firefox per computer: andrebbe riscritto. Poco utile |
+| Clic centrale / Ctrl+clic su un link → nuova scheda in background   | ?  | Il motore lo gestisce (`OPEN_NEWTAB_BACKGROUND`); da provare cosa fa l'app |
+
+### Barra degli indirizzi e ricerca nella pagina
+
+| Manca                                                              |    | Note |
+|--------------------------------------------------------------------|----|------|
+| Trova nella pagina: maiuscole/minuscole, parole intere, evidenzia tutto | 🟡 | Verificato: il motore li ha (`FINDER_FIND_MATCH_CASE`…), i componenti Android passano solo avanti/indietro |
+| Percentuale di zoom nella barra                                    | 🟡 | Limite noto della `0040` |
+| Parole chiave dei segnalibri, calcolatrice e conversioni nella barra | 🔴 | Poco utili; la barra è il codice che Mozilla cambia più spesso |
+
+### Strumenti
+
+| Manca                                                              |    | Note |
+|--------------------------------------------------------------------|----|------|
+| `about:config`                                                     | 🟢 | Verificato: spento solo nella versione stabile |
+| Strumenti per sviluppatori (F12: ispettore, console, rete)         | 🔴 | Verificato: nell'APK c'è solo la parte «server» (`MOZ_DEVTOOLS=server`). Resta il debug da un PC via USB |
+| Sorgente della pagina (Ctrl+U)                                     | 🟢 | Da provare: aprire `view-source:` in una nuova scheda |
+| Schermata di tutta la pagina                                       | 🟡 | Con l'estensione interna (`drawSnapshot`) |
+| Salva pagina completa (HTML)                                       | 🔴 | C'è solo «Salva come PDF» |
+| Video in finestrella (Picture-in-Picture) per qualsiasi video, con i controlli | 🔴 | Android lo dà solo ai video a schermo intero |
+| Controllo ortografico nei campi di testo                           | 🟡 | Verificato: `layout.spellcheckDefault` è `0`. Da provare: servono anche i dizionari |
+| Proxy manuale, impostazioni di rete avanzate                       | 🟢 | Nessuna schermata, ma con `about:config` si possono impostare (`network.proxy.*`) |
+| Esportare le password, importare da altri browser                  | 🟡 | Verificato: l'importazione dei segnalibri da file esiste ma è spenta (`importBookmarksFeatureFlagEnabled`) |
+| Password principale, gestione certificati, criteri aziendali, temi, `userChrome.css`, personalizzazione libera della barra | 🔴 | Non esistono su Android |
+| VPN integrata, chatbot nella barra laterale, anteprime dei link, note delle schede | 🔴 | Novità recenti del solo Firefox per computer, legate ai servizi di Mozilla |
+
+### Estensioni
+
+Verificato (`ext-android.json`): su Android ci sono solo `browserAction`, `pageAction`, `tabs`, `browsingData` più le
+API comuni (`webRequest`, `storage`, `scripting`, `cookies`, `declarativeNetRequest`, `notifications`, `proxy`…).
+
+Mancano (🔴, stanno nel motore già compilato): `menus`/`contextMenus` (voci nel menu col tasto destro), `commands`
+(scorciatoie delle estensioni), `sidebarAction`, `windows`, `bookmarks`, `history`, `sessions`, `tabGroups`,
+`devtools`, `omnibox`, `search`, `find`, `topSites`, `theme`, `identity`, i contenitori e la sostituzione della pagina
+Nuova scheda. Le estensioni che ne dipendono non funzionano o perdono quelle parti.
+
+### Compatibilità con i siti
+
+Presenti in Firefox 160 per computer e assenti su Android (dati MDN):
+
+| Manca                                                              |    | Note |
+|--------------------------------------------------------------------|----|------|
+| Condivisione dello schermo (`getDisplayMedia`, videochiamate)      | 🟡 | Verificato: spenta da una preferenza (`media.getdisplaymedia.enabled`). Da provare |
+| WebCodecs (editor video, alcune videochiamate)                     | 🟡 | Verificato: su Android accesa solo in Nightly (`dom.media.webcodecs.enabled`). Da provare |
+| WebGPU                                                             | 🟡 | Verificato: spenta (`dom.webgpu.enabled`). Da provare, dipende dalla scheda grafica |
+| Web MIDI                                                           | 🟡 | Verificato: spenta da una preferenza (`dom.webmidi.enabled`). Da provare |
+| Web Serial, scelta dell'uscita audio (`setSinkId`)                 | 🔴 | Per l'uscita audio MDN indica un limite di Android |
+| Picture-in-Picture chiesto dal sito, riconoscimento vocale del sito (novità 153 e 160) | 🔴 | |
+| Ridimensionare le caselle di testo (`resize`), tacche dei cursori (`<input type=range list>`) | 🔴 | Dettagli |
+
+Come ci vedono i siti con «sito desktop» (verificato): lo user agent diventa «X11; Linux x86_64» e la pagina è
+disposta su una larghezza di 980 px (`browser.viewport.desktopWidth`). Restano però gli eventi touch e
+`navigator.platform` non viene cambiato, quindi qualche sito capisce lo stesso che è un telefono (versione tablet,
+«scarica l'app»). 🟡 con l'estensione interna si può dichiarare un PC vero, anche solo per i siti che lo richiedono.
+
+### Prestazioni
+
+| Differenza                                                         |    | Note |
+|--------------------------------------------------------------------|----|------|
+| Isolamento dei siti (ogni sito nel suo processo)                   | 🟡 | Verificato: su computer isola tutto; qui il valore predefinito della versione stabile è non isolare niente (`isolationStrategy: 0`), in Nightly solo i siti importanti (`2`); Mozilla può cambiarlo da remoto. È un'impostazione dell'app in `Core.kt`. Più sicurezza, più memoria: da provare |
+| Schede in background                                               | 🔴 | Android ferma Firefox quando non è in primo piano e chiude i processi se serve memoria: le schede si ricaricano. Può aiutare togliere a Firefox l'ottimizzazione della batteria |
+| Velocità del motore                                                | —  | Stesso motore, stesse ottimizzazioni: dipende dal processore |
+
+## Ordine proposto
+
+**A. Piccole, con la tecnica di oggi**
+
+| Passo | Cosa                                                        | Dove |
+|-------|-------------------------------------------------------------|------|
+| A1    | `about:config` attivo                                       | nuova patch facoltativa + aggancio nella `0002` |
+| A2    | Le scorciatoie mancanti                                     | `0020` |
+| A3    | Menu della scheda completo                                  | `0002` |
+| A4    | Ctrl+rotella per lo zoom                                    | `0040` + aggancio nella `0002` |
+| A5    | Anteprima della scheda sotto il mouse                       | `0060` |
+| A6    | Schede fissate                                              | nuova patch facoltativa |
+
+**B. Estensione interna privilegiata** (un'infrastruttura nuova, poi una patch per funzione)
+
+| Passo | Cosa                                                        |
+|-------|-------------------------------------------------------------|
+| B0    | Prova: un'estensione interna con una sola funzione dentro il motore. Se non funziona, la fase B cade |
+| B1    | Zoom vero al posto dello zoom CSS (dovrebbe valere anche per PDF e pagine interne) |
+| B2    | Menu col tasto destro completo                              |
+| B3    | Trova nella pagina con le opzioni                           |
+| B4    | Indirizzo del link sotto il mouse                           |
+| B5    | Dichiararsi un PC vero ai siti, per sito                    |
+| B6    | Sorgente della pagina, schermata di tutta la pagina         |
+
+**C. «Laboratorio»**: una schermata in Impostazioni con gli interruttori del motore da provare (isolamento dei siti,
+WebCodecs, WebGPU, condivisione dello schermo, barre di scorrimento trascinabili, controllo ortografico, ricerca
+rapida). Con A1 si provano prima a mano in `about:config`: nel Laboratorio entrano solo quelli che funzionano.
+
+**D. Grandi, uno alla volta e solo se servono**: vista affiancata, barra laterale, contenitori. Più finestre resta
+scartato.
+
+Rischio della fase B: il codice dentro il motore usa parti interne di Gecko, che possono cambiare tra una versione e
+l'altra. Per questo ogni funzione resta in una patch facoltativa.
