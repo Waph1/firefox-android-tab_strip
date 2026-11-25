@@ -63,7 +63,7 @@ Quando si apre o si chiude il telefono:
 
 - con la **barra degli indirizzi in alto**, la tab strip appare/scompare **al volo**, con un'animazione, e tutto il
   resto si adatta subito: altezza della toolbar e dell'area della pagina, pulsanti della toolbar
-  (avanti/indietro/ricarica sugli schermi larghi), gradiente della status bar;
+  (avanti/indietro/ricarica sugli schermi larghi);
 - con la **barra degli indirizzi in basso** o con la **tab strip in basso** (da Firefox 158 la posizione di entrambe
   si sceglie in **Impostazioni → Personalizza**), Firefox ricostruisce la schermata (si riavvia l'activity, le
   schede restano dove sono), esattamente come fa Chrome quando un pieghevole passa da "telefono" a "tablet". La barra
@@ -448,14 +448,13 @@ Modifiche piccole ai file esistenti:
   la finestra e la mostrano/nascondono con un'animazione.
 - `components/toolbar/BrowserToolbarMiddleware.kt`, `home/toolbar/BrowserToolbarMiddleware.kt` — ricostruiscono i
   pulsanti della toolbar anche quando la finestra cambia senza ruotare (tipico del Fold).
-- `StatusBarColorManager.kt`, `TabStripStatusBarView.kt` — il gradiente della status bar segue la strip.
 - `components/Core.kt` — usa `AdaptiveDesktopModeMiddleware`; `SiteSettingsFragment.kt` — l'interruttore «Richiedi
   sempre sito desktop» si aggiorna se si apre/chiude il telefono con la schermata aperta.
 - `CustomizationFragment.kt` — l'interruttore e la posizione della strip nelle impostazioni usano la preferenza
   utente.
 - `settings/about/AboutFragment.kt`, `AboutItem.kt` — la voce «Cerca aggiornamenti» in Informazioni su Firefox.
 - `TabStrip.kt` (usa `ChromeStyleTabStripContent`), `TabStripState.kt` (stato di caricamento), `dimens.xml`
-  (altezza 40dp), `StatusBarColorManagerTest.kt` (adeguato alle modifiche).
+  (altezza 40dp).
 
 ### `0002`: funzioni facoltative e menu delle schede
 

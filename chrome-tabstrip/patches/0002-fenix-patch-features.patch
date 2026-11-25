@@ -1,5 +1,5 @@
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/AppRequestInterceptor.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/AppRequestInterceptor.kt
-index 81166bea955..c4f90704d08 100644
+index 81166bea9558..c4f90704d084 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/AppRequestInterceptor.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/AppRequestInterceptor.kt
 @@ -23,6 +23,7 @@ import org.mozilla.fenix.AppRequestInterceptor.Companion.ERROR_PAGE_ACTION_SCHEM
@@ -36,7 +36,7 @@ index 81166bea955..c4f90704d08 100644
          val riskLevel = getRiskLevel(improvedErrorType)
  
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
-index b8aa2da7d72..5fa5c241721 100644
+index c11e2751dd64..265e474ffa8e 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/HomeActivity.kt
 @@ -20,7 +20,9 @@ import android.text.format.DateUtils
@@ -49,7 +49,7 @@ index b8aa2da7d72..5fa5c241721 100644
  import android.view.MotionEvent
  import android.view.View
  import android.view.ViewConfiguration
-@@ -177,6 +179,7 @@ import org.mozilla.fenix.nimbus.FxNimbus
+@@ -181,6 +183,7 @@ import org.mozilla.fenix.nimbus.FxNimbus
  import org.mozilla.fenix.onboarding.ensureMarketingChannelExists
  import org.mozilla.fenix.onboarding.seedOnboardingCompletedTimestampForDebugIfNeeded
  import org.mozilla.fenix.pbmlock.DefaultPrivateBrowsingLockStorage
@@ -57,7 +57,7 @@ index b8aa2da7d72..5fa5c241721 100644
  import org.mozilla.fenix.pbmlock.PrivateBrowsingLockFeature
  import org.mozilla.fenix.perf.DefaultStartupPathProvider
  import org.mozilla.fenix.perf.MarkersActivityLifecycleCallbacks
-@@ -492,6 +495,7 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -507,6 +510,7 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
          // Custom tabs never show the tab strip, nor look for updates.
          if (this !is ExternalAppBrowserActivity) {
              SelfUpdater(this).start()
@@ -65,7 +65,7 @@ index b8aa2da7d72..5fa5c241721 100644
          }
  
          // Checks if Activity is currently in PiP mode if launched from external intents, then exits it
-@@ -1357,6 +1361,8 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -1372,6 +1376,8 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
      }
  
      override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -74,7 +74,7 @@ index b8aa2da7d72..5fa5c241721 100644
          // The KEYCODE_MENU event is handled here instead of onKeyDown or onKeyUp because
          // after navigating to another fragment like Settings or Bookmarks, and then back this
          // key event is somehow getting consumed before it reaches onKeyDown or onKeyUp.
-@@ -1389,6 +1395,15 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
+@@ -1392,6 +1398,15 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
          return super.dispatchKeyEvent(event)
      }
  
@@ -91,10 +91,10 @@ index b8aa2da7d72..5fa5c241721 100644
          // Inspired by
          // https://searchfox.org/mozilla-esr68/source/mobile/android/base/java/org/mozilla/gecko/BrowserApp.java#584-613
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
-index bfc1e163c34..fa5da7ff6c1 100644
+index 0cb09f207056..53ac191ceca7 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/BaseBrowserFragment.kt
-@@ -229,10 +229,12 @@ import org.mozilla.fenix.ext.requireComponents
+@@ -233,10 +233,12 @@ import org.mozilla.fenix.ext.requireComponents
  import org.mozilla.fenix.ext.runIfFragmentIsAttached
  import org.mozilla.fenix.ext.secure
  import org.mozilla.fenix.ext.tabClosedUndoMessage
@@ -107,7 +107,7 @@ index bfc1e163c34..fa5da7ff6c1 100644
  import org.mozilla.fenix.pbmlock.BlackScreenOverlay
  import org.mozilla.fenix.pbmlock.NavigationOrigin
  import org.mozilla.fenix.pbmlock.observePrivateModeLock
-@@ -1487,6 +1489,11 @@ abstract class BaseBrowserFragment :
+@@ -1525,6 +1527,11 @@ abstract class BaseBrowserFragment :
              topToolbarHeight = getTopToolbarHeight(includeTabStripIfAvailable = customTabSessionId == null),
              bottomToolbarHeight = bottomToolbarHeight,
          )
@@ -117,9 +117,9 @@ index bfc1e163c34..fa5da7ff6c1 100644
 +            PatchFeatureHooks.addressBarRowsChanged.collect { reinitializeEngineView() }
 +        }
  
+         initPdfTools(context = context, rootView = view)
          initializeMicrosurveyFeature(context)
-     }
-@@ -1626,6 +1633,7 @@ abstract class BaseBrowserFragment :
+@@ -1695,6 +1702,7 @@ abstract class BaseBrowserFragment :
                  onCloseTabClick = { isPrivate ->
                      showUndoSnackbar(requireContext().tabClosedUndoMessage(isPrivate))
                  },
@@ -128,7 +128,7 @@ index bfc1e163c34..fa5da7ff6c1 100644
              )
          }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
-index 63262feabe8..b52d63a75f9 100644
+index 63262feabe88..b52d63a75f90 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/ChromeStyleTabStrip.kt
 @@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.padding
@@ -575,7 +575,7 @@ index 63262feabe8..b52d63a75f9 100644
 +
 +private fun TabStripItem.toTabStripTabInfo() = TabStripTabInfo(id, title, url, isPrivate, isSelected)
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
-index 22c53525544..b7fb56c029f 100644
+index 22c53525544b..b7fb56c029ff 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStrip.kt
 @@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
@@ -692,7 +692,7 @@ index 22c53525544..b7fb56c029f 100644
      TabStripMetrics.newTabTapped.record()
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripTabMenu.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripTabMenu.kt
 new file mode 100644
-index 00000000000..06b0b527545
+index 000000000000..06b0b527545e
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/browser/tabstrip/TabStripTabMenu.kt
 @@ -0,0 +1,75 @@
@@ -772,19 +772,19 @@ index 00000000000..06b0b527545
 +    )
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Analytics.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Analytics.kt
-index 6774a4eb6ce..137e691a98d 100644
+index e72e6b933cf3..c0a9ad5390d3 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Analytics.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/Analytics.kt
-@@ -43,6 +43,8 @@ import org.mozilla.fenix.crashes.NimbusExperimentDataProvider
+@@ -46,6 +46,8 @@ import org.mozilla.fenix.crashes.NimbusExperimentDataProvider
  import org.mozilla.fenix.crashes.ReleaseRuntimeTagProvider
  import org.mozilla.fenix.crashes.crashReportOption
  import org.mozilla.fenix.ext.getCustomGleanServerUrlIfAvailable
 +import org.mozilla.fenix.patchfeatures.CrashReporting
 +import org.mozilla.fenix.patchfeatures.PatchFeatureHooks
- import org.mozilla.fenix.perf.lazyMonitored
  import org.mozilla.fenix.utils.Settings
  import org.mozilla.geckoview.BuildConfig.MOZ_APP_BUILDID
-@@ -127,9 +129,13 @@ class Analytics(
+ import org.mozilla.geckoview.BuildConfig.MOZ_APP_VENDOR
+@@ -130,9 +132,13 @@ class Analytics(
                  null
              }
  
@@ -799,7 +799,7 @@ index 6774a4eb6ce..137e691a98d 100644
              telemetryServices =
                  listOf(
                      GleanCrashReporterService(
-@@ -145,7 +151,7 @@ class Analytics(
+@@ -148,7 +154,7 @@ class Analytics(
              promptConfiguration =
                  CrashReporter.PromptConfiguration(
                      appName = context.getString(R.string.app_name),
@@ -809,10 +809,10 @@ index 6774a4eb6ce..137e691a98d 100644
              enabled = true,
              nonFatalCrashIntent = pendingIntent,
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/menu/MenuDialogFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/menu/MenuDialogFragment.kt
-index 25211dc6d1b..026741747d8 100644
+index cf262ac0142c..9d6b65af49df 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/menu/MenuDialogFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/menu/MenuDialogFragment.kt
-@@ -110,6 +110,7 @@ import org.mozilla.fenix.ext.requireComponents
+@@ -111,6 +111,7 @@ import org.mozilla.fenix.ext.requireComponents
  import org.mozilla.fenix.ext.runIfFragmentIsAttached
  import org.mozilla.fenix.ipprotection.ui.IPProtectionSnackbarBinding
  import org.mozilla.fenix.nimbus.FxNimbus
@@ -820,7 +820,7 @@ index 25211dc6d1b..026741747d8 100644
  import org.mozilla.fenix.settings.SupportUtils
  import org.mozilla.fenix.settings.deletebrowsingdata.DefaultDeleteBrowsingDataController
  import org.mozilla.fenix.settings.deletebrowsingdata.DefaultDeleteBrowsingDataController.DataStorage
-@@ -180,6 +181,12 @@ class MenuDialogFragment : BottomSheetDialogFragment() {
+@@ -181,6 +182,12 @@ class MenuDialogFragment : BottomSheetDialogFragment() {
      override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
          Events.toolbarMenuVisible.record(NoExtras())
  
@@ -833,7 +833,7 @@ index 25211dc6d1b..026741747d8 100644
          return object : BottomSheetDialog(requireContext(), theme) {
                  override fun onKeyDown(
                      keyCode: Int,
-@@ -294,6 +301,9 @@ class MenuDialogFragment : BottomSheetDialogFragment() {
+@@ -299,6 +306,9 @@ class MenuDialogFragment : BottomSheetDialogFragment() {
              val isTranslationsEnabled =
                  TranslationsEnabledSettings.dataStore(requireContext()).isEnabled.collectAsState(true)
  
@@ -843,7 +843,7 @@ index 25211dc6d1b..026741747d8 100644
              MenuDialogBottomSheet(
                  modifier = Modifier.padding(top = 16.dp, bottom = 16.dp).width(32.dp),
                  onRequestDismiss = ::dismiss,
-@@ -305,13 +315,18 @@ class MenuDialogFragment : BottomSheetDialogFragment() {
+@@ -310,13 +320,18 @@ class MenuDialogFragment : BottomSheetDialogFragment() {
                                  !settings.shouldUseExpandedToolbar &&
                                  (isExtensionsExpanded || isMoreMenuExpanded) &&
                                  args.accesspoint == MenuAccessPoint.Browser,
@@ -867,7 +867,7 @@ index 25211dc6d1b..026741747d8 100644
                  val syncStore = components.backgroundServices.syncStore
                  val tabCollectionStorage = components.core.tabCollectionStorage
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/menu/compose/MainMenu.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/menu/compose/MainMenu.kt
-index aec18f553f7..cbb129fbbfb 100644
+index 7c21920b7090..0e24f18f12b1 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/menu/compose/MainMenu.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/menu/compose/MainMenu.kt
 @@ -64,6 +64,7 @@ import org.mozilla.fenix.components.menu.MenuDialogTestTag.MORE_OPTION_CHEVRON
@@ -878,7 +878,7 @@ index aec18f553f7..cbb129fbbfb 100644
  import org.mozilla.fenix.theme.FirefoxTheme
  
  /**
-@@ -238,6 +239,9 @@ fun MainMenu(
+@@ -241,6 +242,9 @@ fun MainMenu(
              }
          },
      ) {
@@ -889,7 +889,7 @@ index aec18f553f7..cbb129fbbfb 100644
              MenuGroup {
                  MenuItem(
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
-index 8894d39e82f..ceef2c37a80 100644
+index 6de58c03833d..d8de95959d7c 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/toolbar/BrowserToolbarComposable.kt
 @@ -56,6 +56,7 @@ import org.mozilla.fenix.components.AppStore
@@ -900,7 +900,7 @@ index 8894d39e82f..ceef2c37a80 100644
  import org.mozilla.fenix.theme.FirefoxTheme
  import org.mozilla.fenix.utils.Settings
  
-@@ -179,6 +180,7 @@ class BrowserToolbarComposable(
+@@ -177,6 +178,7 @@ class BrowserToolbarComposable(
                                              settings.shouldUseMinimalBottomToolbarWhenEnteringText,
                                      )
                                      if (customTabSession == null) {
@@ -908,7 +908,7 @@ index 8894d39e82f..ceef2c37a80 100644
                                          searchSuggestionsContent(Modifier.weight(1f))
                                      }
                                  }
-@@ -197,6 +199,9 @@ class BrowserToolbarComposable(
+@@ -195,6 +197,9 @@ class BrowserToolbarComposable(
                                          if (shouldShowTabGroupsStrip) {
                                              tabGroupsStripContent()
                                          }
@@ -919,7 +919,7 @@ index 8894d39e82f..ceef2c37a80 100644
                                              store = toolbarStore,
                                              cfr = toolbarCFR,
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/ext/BaseBrowserFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/ext/BaseBrowserFragment.kt
-index 5264ea70f6b..a0286dc4854 100644
+index 5264ea70f6ba..a0286dc4854b 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/ext/BaseBrowserFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/ext/BaseBrowserFragment.kt
 @@ -8,6 +8,7 @@ import mozilla.components.support.utils.ext.pixelSizeFor
@@ -964,10 +964,10 @@ index 5264ea70f6b..a0286dc4854 100644
 +    return toolbarHeight + tabStripHeight + addressBarRowsHeight
  }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt
-index b912da986ed..85b737e3fdf 100644
+index e0188e39be22..8b94c2a3a40e 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/HomeFragment.kt
-@@ -129,6 +129,7 @@ import org.mozilla.fenix.ext.nav
+@@ -135,6 +135,7 @@ import org.mozilla.fenix.ext.nav
  import org.mozilla.fenix.ext.recordEventInNimbus
  import org.mozilla.fenix.ext.requireComponents
  import org.mozilla.fenix.ext.tabClosedUndoMessage
@@ -975,7 +975,7 @@ index b912da986ed..85b737e3fdf 100644
  import org.mozilla.fenix.home.bookmarks.BookmarksFeature
  import org.mozilla.fenix.home.bookmarks.controller.DefaultBookmarksController
  import org.mozilla.fenix.home.collections.migration.CollectionsMigrationCardAction
-@@ -1140,6 +1141,7 @@ class HomeFragment : Fragment(), UserInteractionHandler, OnLongPressedListener {
+@@ -1130,6 +1131,7 @@ class HomeFragment : Fragment(), UserInteractionHandler, OnLongPressedListener {
                  onCloseTabClick = { isPrivate ->
                      showUndoSnackbar(requireContext().tabClosedUndoMessage(isPrivate))
                  },
@@ -984,10 +984,10 @@ index b912da986ed..85b737e3fdf 100644
              )
          }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
-index 129bef85aa8..7980c9d04af 100644
+index 93342ca6a3a2..17ad7da350c1 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/home/toolbar/HomeToolbarComposable.kt
-@@ -54,6 +54,7 @@ import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchStarte
+@@ -55,6 +55,7 @@ import org.mozilla.fenix.components.appstate.AppAction.SearchAction.SearchStarte
  import org.mozilla.fenix.components.appstate.VoiceSearchAction.VoiceInputRequested
  import org.mozilla.fenix.components.metrics.MetricsUtils
  import org.mozilla.fenix.components.toolbar.TopDividerColumn
@@ -995,7 +995,7 @@ index 129bef85aa8..7980c9d04af 100644
  import org.mozilla.fenix.theme.FirefoxTheme
  import org.mozilla.fenix.utils.Settings
  import org.mozilla.fenix.wallpapers.WallpaperTheme
-@@ -179,6 +180,10 @@ internal class HomeToolbarComposable(
+@@ -182,6 +183,10 @@ internal class HomeToolbarComposable(
                      tabStripContent()
                  }
  
@@ -1006,7 +1006,7 @@ index 129bef85aa8..7980c9d04af 100644
                  AddressBar(wallpaperTextColor = wallpaperTextColor)
  
                  if (shouldUseBottomToolbar) {
-@@ -187,6 +192,7 @@ internal class HomeToolbarComposable(
+@@ -190,6 +195,7 @@ internal class HomeToolbarComposable(
              }
  
              if (!shouldUseBottomToolbar) {
@@ -1016,7 +1016,7 @@ index 129bef85aa8..7980c9d04af 100644
          }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
 new file mode 100644
-index 00000000000..0ee4ddffcd8
+index 000000000000..0ee4ddffcd8e
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeatures.kt
 @@ -0,0 +1,532 @@
@@ -1554,7 +1554,7 @@ index 00000000000..0ee4ddffcd8
 +    }
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeaturesDialog.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeaturesDialog.kt
 new file mode 100644
-index 00000000000..2c1fdae526c
+index 000000000000..2c1fdae526c6
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/patchfeatures/PatchFeaturesDialog.kt
 @@ -0,0 +1,43 @@
@@ -1602,7 +1602,7 @@ index 00000000000..2c1fdae526c
 +        .show()
 +}
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt
-index 878e7d62e3e..3ca1758d2ee 100644
+index 878e7d62e3ec..3ca1758d2ee9 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/selfupdate/SelfUpdater.kt
 @@ -17,6 +17,7 @@ import android.widget.Toast
@@ -1740,18 +1740,18 @@ index 878e7d62e3e..3ca1758d2ee 100644
          val progressBar =
              ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply {
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
-index 6e10cbf3809..ce3922ad394 100644
+index af8afb93cf30..b8495e4b22da 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/CustomizationFragment.kt
-@@ -36,6 +36,7 @@ import org.mozilla.fenix.ext.isTallWindow
- import org.mozilla.fenix.ext.isWideWindow
+@@ -37,6 +37,7 @@ import org.mozilla.fenix.ext.isWideWindow
+ import org.mozilla.fenix.ext.nav
  import org.mozilla.fenix.ext.requireComponents
  import org.mozilla.fenix.ext.showToolbar
 +import org.mozilla.fenix.patchfeatures.PatchFeatureHooks
  import org.mozilla.fenix.settings.settingssearch.PreferenceFileInformation.CustomizationPreferences
  import org.mozilla.fenix.settings.settingssearch.SettingsSearchItem
  import org.mozilla.fenix.settings.settingssearch.SettingsSearchProvider
-@@ -67,6 +68,7 @@ class CustomizationFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFrag
+@@ -70,6 +71,7 @@ class CustomizationFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFrag
          setPreferencesFromResource(R.xml.customization_preferences, rootKey)
  
          setupPreferences(dynamicFeaturesStatus)
@@ -1760,7 +1760,7 @@ index 6e10cbf3809..ce3922ad394 100644
  
      override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutFragment.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutFragment.kt
-index 53cfe207d67..4ddc00577b6 100644
+index 53cfe207d67b..4ddc00577b61 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutFragment.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutFragment.kt
 @@ -29,6 +29,8 @@ import org.mozilla.fenix.ext.components
@@ -1794,7 +1794,7 @@ index 53cfe207d67..4ddc00577b6 100644
      }
  
 diff --git a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutItem.kt b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutItem.kt
-index ecb5890d8b4..a2499159446 100644
+index ecb5890d8b48..a24991594461 100644
 --- a/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutItem.kt
 +++ b/mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/about/AboutItem.kt
 @@ -13,6 +13,9 @@ sealed class AboutItem {
@@ -1809,7 +1809,7 @@ index ecb5890d8b4..a2499159446 100644
  enum class AboutItemType {
 diff --git a/mobile/android/fenix/app/src/main/res/values-it/patch_features_strings.xml b/mobile/android/fenix/app/src/main/res/values-it/patch_features_strings.xml
 new file mode 100644
-index 00000000000..f180679a520
+index 000000000000..f180679a520d
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/res/values-it/patch_features_strings.xml
 @@ -0,0 +1,14 @@
@@ -1829,7 +1829,7 @@ index 00000000000..f180679a520
 +</resources>
 diff --git a/mobile/android/fenix/app/src/main/res/values/patch_features_strings.xml b/mobile/android/fenix/app/src/main/res/values/patch_features_strings.xml
 new file mode 100644
-index 00000000000..ab8ad0fe0c0
+index 000000000000..ab8ad0fe0c08
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/main/res/values/patch_features_strings.xml
 @@ -0,0 +1,28 @@
@@ -1863,7 +1863,7 @@ index 00000000000..ab8ad0fe0c0
 +</resources>
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/TabStripTabMenuTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/TabStripTabMenuTest.kt
 new file mode 100644
-index 00000000000..c426113bd90
+index 000000000000..c426113bd901
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/browser/tabstrip/TabStripTabMenuTest.kt
 @@ -0,0 +1,62 @@
@@ -1931,7 +1931,7 @@ index 00000000000..c426113bd90
 +    }}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/CustomizationPreferencesTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/CustomizationPreferencesTest.kt
 new file mode 100644
-index 00000000000..6a306e57320
+index 000000000000..6a306e57320d
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/CustomizationPreferencesTest.kt
 @@ -0,0 +1,53 @@
@@ -1990,7 +1990,7 @@ index 00000000000..6a306e57320
 +}
 diff --git a/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/PatchFeaturesTest.kt b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/PatchFeaturesTest.kt
 new file mode 100644
-index 00000000000..a0222919147
+index 000000000000..a0222919147a
 --- /dev/null
 +++ b/mobile/android/fenix/app/src/test/java/org/mozilla/fenix/patchfeatures/PatchFeaturesTest.kt
 @@ -0,0 +1,115 @@
